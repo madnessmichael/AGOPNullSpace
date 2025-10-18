@@ -9,9 +9,9 @@ from transformers import Qwen2ForCausalLM, Qwen2Model, Qwen2Config
 from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer
 
 # Add these imports
-from typing import Optional, Tuple, Union, List, Dict, Unpack
+from typing import Optional, Tuple, Union, List, Dict#, Unpack
 from transformers.cache_utils import Cache
-from transformers.models.qwen2.modeling_qwen2 import FlashAttentionKwargs
+# from transformers.models.qwen2.modeling_qwen2 import FlashAttentionKwargs
 
 # Configure logging
 logging.basicConfig(
@@ -70,7 +70,7 @@ class AlphaQwen2DecoderLayer(Qwen2DecoderLayer):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
-        **kwargs: Unpack[FlashAttentionKwargs],
+        **kwargs #: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         
         if hidden_states.shape[1] > 1: # Only apply steering on initial input

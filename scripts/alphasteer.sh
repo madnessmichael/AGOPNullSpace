@@ -6,7 +6,7 @@ EMBEDDING_DIR=data/embeddings/llama3.1  # Output directory for embeddings
 NICKNAME=llama3.1
 MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct  # Model name from HuggingFace
 
-DEVICE=cuda:0
+DEVICE=cuda:4
 
 
 # Extract embeddings

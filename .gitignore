@@ -4,3 +4,6 @@ embeddings/
 steering_matrix/
 
 requirements(drop).txt
+
+config/
+responses/
