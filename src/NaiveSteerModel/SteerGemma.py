@@ -100,16 +100,17 @@ class SteerGemma2DecoderLayer(Gemma2DecoderLayer):
             if self.steering_vector.device != hidden_states.device:
                 self.steering_vector = self.steering_vector.to(hidden_states.device)
 
-            B, T, _ = hidden_states.shape
-            device = hidden_states.device
-            last_idx = get_last_valid_token_index(
-                attention_mask=attention_mask,
-                seq_len=T,
-                batch_size=B,
-                device=device,
-            )
-            batch_idx = torch.arange(B, device=device)
-            hidden_states[batch_idx, last_idx, :] += self.steering_vector * self.strength
+            # B, T, _ = hidden_states.shape
+            # device = hidden_states.device
+            # last_idx = get_last_valid_token_index(
+            #     attention_mask=attention_mask,
+            #     seq_len=T,
+            #     batch_size=B,
+            #     device=device,
+            # )
+            # batch_idx = torch.arange(B, device=device)
+            # hidden_states[batch_idx, last_idx, :] += self.steering_vector * self.strength
+            hidden_states = hidden_states + self.steering_vector * self.strength
         
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
