@@ -1,6 +1,7 @@
 # Core dependencies for AlphaSteer
 torch==2.6.0
 transformers==4.52.4
+vllm==0.8.5
 numpy==1.26.4
 pandas==2.2.3
 
