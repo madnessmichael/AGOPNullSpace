@@ -12,6 +12,7 @@ from transformers import Qwen2ForCausalLM, Qwen2Model, Qwen2Config
 from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer
 from transformers.cache_utils import Cache
 from .MLP import SteeringMLP
+from utils.mask_utils import get_last_valid_token_index
 
 from typing import Optional, Tuple, Union, List, Dict
 
@@ -95,12 +96,20 @@ class MLPSteerQwen2DecoderLayer(Qwen2DecoderLayer):
         if hidden_states.shape[1] > 1: # Only apply steering on initial input
             
             if self.steering_mlp is not None:
-                # Only apply steering once during input processing
-                # Calculate steering vector by multiplying the last token's hidden state with the steering matrix
-                steering_vector = self.steering_mlp(hidden_states[:, -1, :]) * self.strength
-                # Reshape to match hidden_states dimensions and move to the same device
+                B, T, _ = hidden_states.shape
+                device = hidden_states.device
+
+                last_idx = get_last_valid_token_index(
+                    attention_mask=attention_mask,
+                    seq_len=T,
+                    batch_size=B,
+                    device=device,
+                )
+                batch_idx = torch.arange(B, device=device)
+                last_hidden = hidden_states[batch_idx, last_idx, :]
+
+                steering_vector = self.steering_mlp(last_hidden) * self.strength
                 steering_vector = steering_vector.unsqueeze(1).to(hidden_states.device)
-                # Apply steering by adding the steering vector to hidden states
                 hidden_states = hidden_states + steering_vector
                 
                 # self.steering_vector = hidden_states[:, -1, :] @ self.steering_matrix * self.strength

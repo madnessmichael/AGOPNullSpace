@@ -93,6 +93,7 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
+    # tokenizer.padding_side = "right"
     strength = [0.0] * num_layers
     
     model = model_class.from_pretrained(
@@ -114,32 +115,58 @@ if __name__ == "__main__":
     
     with open(args.input_file, "r") as f:
         prompts = json.load(f)
+
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    if args.output_file is not None:
+        output_file = args.output_file
+    else:
+        output_file = args.input_file
+    if args.file_rename:
+        output_file = output_file.replace(".json", f"_{timestamp}.json")
+
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    logger.info(f"output_file: {output_file}")
+
+    if os.path.exists(output_file):
+        logger.info(f"output_file already exists: {output_file}, load from it")
+        with open(output_file, "r") as f:
+            prompts = json.load(f)
+    else:
+        logger.info(f"output_file does not exist: {output_file}, generate from scratch")
+
     logger.info(f"len(prompts):\t{len(prompts)}")
     if "gsm8k" in args.input_file or "math" in args.input_file:
+        logger.info("gsm8k or math, use template")
         template = Template(template_jinja)
         messages = [{"role": "user", "content": template.render(prompt=prompt[args.prompt_column])} for prompt in prompts]
+        formatted_prompts = [
+            tokenizer.apply_chat_template([message], tokenize=False, add_generation_prompt=True)
+            for message in messages
+        ]
+    # elif "advprompt" in args.input_file or "gcg" in args.input_file:
+    #     logger.info("advprompt or gcg, use original prompt directly")
+    #     formatted_prompts = [prompt[args.prompt_column] for prompt in prompts]
     else:
+        logger.info("use template")
         messages = [{"role": "user", "content": prompt[args.prompt_column]} for prompt in prompts]
 
-    formatted_prompts = [
-        tokenizer.apply_chat_template([message], tokenize=False, add_generation_prompt=True)
-        for message in messages
-    ]
+        formatted_prompts = [
+            tokenizer.apply_chat_template([message], tokenize=False, add_generation_prompt=True)
+            for message in messages
+        ]
     
     total_batches = (len(formatted_prompts) + args.batch_size - 1) // args.batch_size
-    timestamp = time.strftime('%Y%m%d_%H%M%S')
-    output_file = args.output_file.replace(".json", f"_{timestamp}.json") if hasattr(
-        args, "output_file") else args.input_file.replace(".json", f"_{timestamp}.json")
     
+
     if hasattr(args, "strength"):
-        const_strength_list = [float(s) for s in args.strength.split(",")]
+        const_strength_list = [float(s) for s in args.strength.split(",") if s != ""]
     else:
         logger.info("No strength provided, using default strength")
         const_strength_list = [0.0]
     
     logger.info(f"const_strength_list: {const_strength_list}")
     completed_strengths = []
-    
+    batch_idx = 0
     try:
         for const_strength in const_strength_list:
             if steering_layers is not None:

@@ -11,6 +11,7 @@ from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from typing import Optional, Tuple, Union, List, Dict #, Unpack
 from transformers.cache_utils import Cache
 # from transformers.models.llama.modeling_llama import FlashAttentionKwargs
+from utils.mask_utils import get_last_valid_token_index
 
 # Configure logging
 logging.basicConfig(
@@ -44,8 +45,7 @@ class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
             self.steering_matrix = None
         self.strength = strength
         
-    def set_steering_parameters(
-        self, 
+    def set_steering_parameters(self, 
         steering_matrix: Optional[torch.Tensor]=None, 
         strength: float = 0.0,
         device: Optional[torch.device]=None):
@@ -56,7 +56,7 @@ class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
             self.steering_matrix = steering_matrix.to(device)
         self.strength = strength
         # self.steering_vector = None
-        
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -70,27 +70,49 @@ class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
         # **kwargs: Unpack[FlashAttentionKwargs],
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        
+        """
+        Use attention_mask to find the last non-PAD token for each sample,
+        then compute the steering_vector based on the hidden state at that position.
+        This approach is robust to both left and right padding.
+        """
         # Ensure steering_matrix is on the same device as hidden_states
-        if hidden_states.shape[1] > 1: # Only apply steering on initial input
-            if self.steering_matrix is not None and torch.any(self.steering_matrix):
-                # Only apply steering once during input processing
-                if self.steering_matrix.device != hidden_states.device:
-                    self.steering_matrix = self.steering_matrix.to(hidden_states.device)
-                # Calculate steering vector by multiplying the last token's hidden state with the steering matrix
-                steering_vector = hidden_states[:, -1, :] @ self.steering_matrix * self.strength
-                # Reshape to match hidden_states dimensions and move to the same device
-                steering_vector = steering_vector.unsqueeze(1).to(hidden_states.device)
-                # Apply steering by adding the steering vector to hidden states
-                hidden_states = hidden_states + steering_vector
-                
-                # self.steering_vector = hidden_states[:, -1, :] @ self.steering_matrix * self.strength
-                # self.steering_vector = self.steering_vector.unsqueeze(1).to(hidden_states.device) # Same dimensions as hidden_states
-        # if self.steering_vector is not None:
-        #     if self.steering_vector.device != hidden_states.device:
-        #         self.steering_vector = self.steering_vector.to(hidden_states.device)
+        # Only apply steering on initial input
+        should_apply_steering = (
+            hidden_states.shape[1] > 1
+            and self.steering_matrix is not None
+            and torch.any(self.steering_matrix)
+            and self.strength != 0.0
+        )
+        
+        if should_apply_steering:
+
+            # Only apply steering once during input processing
+            if self.steering_matrix.device != hidden_states.device:
+                self.steering_matrix = self.steering_matrix.to(hidden_states.device)
             
-        #     hidden_states = hidden_states + self.steering_vector
+            B, T, D = hidden_states.shape
+            device = hidden_states.device
+
+            # Use the unified function to acquire the index of the last non-pad token
+            last_idx = get_last_valid_token_index(
+                attention_mask=attention_mask,
+                seq_len=T,
+                batch_size=B,
+                device=device,
+            )  # (B,)
+
+            # Construct indices to extract the last valid hidden state from each sample in hidden_states
+            # hidden_states: (B, T, D)
+            # last_hidden: (B, D)
+
+            batch_idx = torch.arange(B, device=hidden_states.device)
+            last_hidden = hidden_states[batch_idx, last_idx, :]  # (B, D)
+            steering_vector = last_hidden @ self.steering_matrix * self.strength  # (B, D)
+
+            # Reshape to match hidden_states dimensions and move to the same device
+            steering_vector = steering_vector.unsqueeze(1)
+            # Apply steering by adding the steering vector to hidden states
+            hidden_states = hidden_states + steering_vector
             
         residual = hidden_states # resid_pre - save for residual connection
 
@@ -245,60 +267,3 @@ class AlphaLlamaForCausalLM(LlamaForCausalLM):
             device=device
         )
         
-    def analyze_embed_vector(
-        self,
-        embed_vector: torch.Tensor,
-        layer_idx: int,
-        top_k: int = 5,
-        device: Optional[torch.device] = None,
-    ) -> List[Tuple[int, float]]:
-        """
-        Analyze an embedding vector to find the top-k tokens it's most likely to generate.
-        
-        Args:
-            embed_vector: The embedding vector to analyze
-            layer_idx: Which layer to analyze
-            top_k: Number of top tokens to return
-            device: Device to run computation on
-            
-        Returns:
-            List of (token_id, score) tuples for the top-k tokens
-        """
-        device = device or next(self.parameters()).device
-        embed_vector = embed_vector.to(device)  # Shape: (d_model,)
-
-        # Ensure the embedding vector has the correct shape
-        if embed_vector.dim() != 1:
-            raise ValueError(f"embed_vector must be 1D, but got {embed_vector.dim()}D.")
-
-        # Add batch and sequence dimensions to match decoder input format
-        hidden_states = embed_vector.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, d_model)
-
-        target_layer = self.model.layers[layer_idx]
-        attention_mask = None  # No masking required for single token
-        position_ids = torch.zeros((1, 1), dtype=torch.long, device=device)  # Single position (0)
-        past_key_values = None  # No past key values for this analysis
-        
-        position_embeddings = self.model.rotary_emb(hidden_states, position_ids)
-        hidden_states = target_layer.fnn_output(
-            hidden_states=hidden_states,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_value=past_key_values,
-            output_attentions=False,
-            use_cache=False,
-            position_embeddings=position_embeddings,
-        )  # Shape: (1, 1, d_model)
-        
-        final_hidden_state = hidden_states.squeeze(0).squeeze(0)  # Shape: (d_model,)
-
-        if hasattr(self.lm_head, "weight"):
-            embedding_matrix = self.lm_head.weight  # Shape: (vocab_size, d_model)
-        else:
-            raise ValueError("Could not find the output embedding matrix in `lm_head`.")
-
-        vocab_scores = torch.matmul(embedding_matrix, final_hidden_state)  # Shape: (vocab_size,)
-        top_k_scores, top_k_indices = torch.topk(vocab_scores, top_k)
-        top_tokens = [(token_id.item(), score.item()) for token_id, score in zip(top_k_indices, top_k_scores)]
-
-        return top_tokens

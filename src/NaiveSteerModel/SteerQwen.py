@@ -7,6 +7,7 @@ from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer
 
 from typing import Optional, Tuple, Union, List, Dict#, Unpack
 from transformers.cache_utils import Cache
+from utils.mask_utils import get_last_valid_token_index
 
 # Configure logging
 logging.basicConfig(
@@ -28,12 +29,15 @@ class SteerQwen2DecoderLayer(Qwen2DecoderLayer):
         super().__init__(config, layer_idx)
         self.layer_idx = layer_idx
         
+        device = next(self.parameters()).device
+        dtype = self.input_layernorm.weight.dtype
+        hidden_dim = config.hidden_size
         if steering_vector is not None:
-            self.register_buffer("steering_vector", steering_vector)
+            self.steering_vector = steering_vector.to(device=device, dtype=dtype)
         else:
-            hidden_dim = config.hidden_size
-            self.register_buffer("steering_vector", torch.empty(hidden_dim))
-        self.register_buffer("strength", torch.tensor(strength, dtype=torch.float))
+            self.steering_vector = torch.empty(hidden_dim, device=device, dtype=dtype)
+        strength = 0.0 if strength is None else strength
+        self.strength = torch.tensor(strength, device=device, dtype=dtype)
 
     def set_steering_parameters(
         self, 
@@ -42,11 +46,15 @@ class SteerQwen2DecoderLayer(Qwen2DecoderLayer):
         device: Optional[torch.device] = None):
         
         device = next(self.parameters()).device if device is None else device
+        dtype = self.input_layernorm.weight.dtype
         
         if steering_vector is not None:
-            self.steering_vector.data = steering_vector.to(device)
+            self.steering_vector = steering_vector.to(device=device, dtype=dtype)
+        else:
+            self.steering_vector = None
 
-        self.strength.data = torch.tensor(strength, dtype=torch.float)
+        strength = 0.0 if strength is None else strength
+        self.strength = torch.tensor(strength, device=device, dtype=dtype)
         
     def forward(
         self,
@@ -61,9 +69,28 @@ class SteerQwen2DecoderLayer(Qwen2DecoderLayer):
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         
-        # Apply steering vector
-        if hidden_states.shape[1] > 1:
-            hidden_states = hidden_states + self.steering_vector * self.strength
+        # Apply steering vector only on the last valid token
+        if (
+            hidden_states.shape[1] > 1
+            and self.steering_vector is not None
+            and torch.any(self.steering_vector)
+            and self.strength != 0.0
+        ):
+            if self.steering_vector.device != hidden_states.device:
+                self.steering_vector = self.steering_vector.to(hidden_states.device)
+            if self.strength.device != hidden_states.device:
+                self.strength = self.strength.to(hidden_states.device)
+
+            B, T, _ = hidden_states.shape
+            device = hidden_states.device
+            last_idx = get_last_valid_token_index(
+                attention_mask=attention_mask,
+                seq_len=T,
+                batch_size=B,
+                device=device,
+            )
+            batch_idx = torch.arange(B, device=device)
+            hidden_states[batch_idx, last_idx, :] += self.steering_vector * self.strength
         
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
@@ -137,7 +164,7 @@ class SteerQwen2Model(Qwen2Model):
         logger.info(f"{'Layer':<8}{'Strength':<12}{'Steering Vector'}")
         logger.info("-" * 32)
         for layer_idx, layer in enumerate(self.layers):
-            strength = f"{layer.strength.item():.4f}"
+            strength = f"{layer.strength:.4f}" if isinstance(layer.strength, float) else f"{layer.strength.item():.4f}"
             vector = "None" if layer.steering_vector is None or layer.steering_vector.nelement() == 0 else f"{layer.steering_vector[0].item():.4f}"
             logger.info(f"{layer_idx:<8}{strength:<12}{vector}")
 

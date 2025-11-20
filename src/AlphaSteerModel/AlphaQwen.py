@@ -12,6 +12,7 @@ from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer
 from typing import Optional, Tuple, Union, List, Dict#, Unpack
 from transformers.cache_utils import Cache
 # from transformers.models.qwen2.modeling_qwen2 import FlashAttentionKwargs
+from utils.mask_utils import get_last_valid_token_index
 
 # Configure logging
 logging.basicConfig(
@@ -58,8 +59,7 @@ class AlphaQwen2DecoderLayer(Qwen2DecoderLayer):
             
         self.strength = strength
         # self.steering_vector = None
-            
-     
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -73,20 +73,32 @@ class AlphaQwen2DecoderLayer(Qwen2DecoderLayer):
         **kwargs #: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         
-        if hidden_states.shape[1] > 1: # Only apply steering on initial input
-            if self.steering_matrix is not None and torch.any(self.steering_matrix):
-                # Only apply steering once during input processing
-                if self.steering_matrix.device != hidden_states.device:
-                    self.steering_matrix = self.steering_matrix.to(hidden_states.device)
-                # Calculate steering vector by multiplying the last token's hidden state with the steering matrix
-                steering_vector = hidden_states[:, -1, :] @ self.steering_matrix * self.strength
-                # Reshape to match hidden_states dimensions and move to the same device
-                steering_vector = steering_vector.unsqueeze(1).to(hidden_states.device)
-                # Apply steering by adding the steering vector to hidden states
-                hidden_states = hidden_states + steering_vector
-                
-                # self.steering_vector = hidden_states[:, -1, :] @ self.steering_matrix * self.strength
-                # self.steering_vector = self.steering_vector.unsqueeze(1).to(hidden_states.device) # Same dimensions as hidden_states
+        should_apply_steering = (
+            hidden_states.shape[1] > 1
+            and self.steering_matrix is not None
+            and torch.any(self.steering_matrix)
+            and self.strength != 0.0
+        )
+
+        if should_apply_steering:
+            if self.steering_matrix.device != hidden_states.device:
+                self.steering_matrix = self.steering_matrix.to(hidden_states.device)
+
+            B, T, _ = hidden_states.shape
+            device = hidden_states.device
+
+            last_idx = get_last_valid_token_index(
+                attention_mask=attention_mask,
+                seq_len=T,
+                batch_size=B,
+                device=device,
+            )
+
+            batch_idx = torch.arange(B, device=device)
+            last_hidden = hidden_states[batch_idx, last_idx, :]
+            steering_vector = last_hidden @ self.steering_matrix * self.strength
+            steering_vector = steering_vector.unsqueeze(1)
+            hidden_states = hidden_states + steering_vector
         # if self.steering_vector is not None:
         #     if self.steering_vector.device != hidden_states.device:
         #         self.steering_vector = self.steering_vector.to(hidden_states.device)
