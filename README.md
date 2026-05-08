@@ -16,16 +16,16 @@
   <img src="figures/fig1_method_overview.png" width="95%" alt="AGOPNullSpace pipeline overview"/>
 </p>
 
+> **EMNLP 2025 submission:** *One Vector, Two Directions: Nullspace RFM Steering for LLM Safety Alignment and Adversarial Jailbreaking*
+<p align="center">
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=22&pause=650&color=FF3B3B&center=true&vCenter=true&width=850&lines=🚨+EMNLP+2025+DEADLINE+INCOMING+🚨;🗓+DEADLINE:+25-5-2026+ᯓ🏃🏻‍♀️‍➡️;🚀+EXECUTION+MODE:+FULL+SPEED+⚡;🔥+PUSH+CODE+%7C+📄+PUSH+PAPER+%7C+💣+PUSH+LIMITS;⚠️+SUBMISSION+OR+REGRET+💀" />
+</p>
 ---
 
 ## Overview
 
 **AGOPNullSpace** replaces the difference-in-means refusal direction used in standard activation steering with a kernel-learned direction derived from the **Average Gradient Outer Product (AGOP)** of a Recursive Feature Machine (RFM). The null-space constraint from [AlphaSteer (ICLR 2026)](https://github.com/AlphaLab-USTC/AlphaSteer) is preserved as-is, keeping utility preservation guarantees intact while improving the quality of the refusal direction — particularly against encoding-based attacks such as Cipher.
 
-> **EMNLP 2025 submission:** *One Vector, Two Directions: Nullspace RFM Steering for LLM Safety Alignment and Adversarial Jailbreaking*
-<p align="center">
-  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=22&pause=650&color=FF3B3B&center=true&vCenter=true&width=850&lines=🚨+EMNLP+2025+DEADLINE+INCOMING+🚨;🗓+DEADLINE:+25-5-2026+ᯓ🏃🏻‍♀️‍➡️;🚀+EXECUTION+MODE:+FULL+SPEED+⚡;🔥+PUSH+CODE+%7C+📄+PUSH+PAPER+%7C+💣+PUSH+LIMITS;⚠️+SUBMISSION+OR+REGRET+💀" />
-</p>
 ---
 
 ## Key Idea
