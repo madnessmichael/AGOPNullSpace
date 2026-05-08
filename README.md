@@ -389,3 +389,16 @@ If you use AGOPNullSpace, please also cite the AlphaSteer paper this work builds
 
 This project is built on top of [AlphaSteer](https://github.com/AlphaLab-USTC/AlphaSteer). The null-space projection and closed-form steering matrix derivation (Eq. 9) are taken directly from that work. AGOPNullSpace contributes the AGOP-based direction computation as a drop-in replacement for the DiffMean step, drawing on the theory of Recursive Feature Machines (Beaglehole et al., Science 2026).
 
+---
+
+## TODO
+
+- [ ] Re-check AGOPNullSpace baseline calibration (`λ = 0`) to ensure consistency with DiffMean(`ε = 0`) steering
+- [ ] Run native AGOP-only baseline (without NullSpace constraint)
+- [ ] Run DiffMean + NullSpace with positive ε to analyze possible reverse / jailbreak steering effects
+- [ ] Re-evaluate final results using GPT-4o and Gemini as judge models
+- [ ] Run full experiments on Qwen2.5-7B-Instruct and Gemma-2-9B-IT
+- [ ] Add complete ablation table (DiffMean vs AGOP vs AGOPNullSpace)
+- [ ] Verify deterministic behavior across seeds and GCG generations
+
+---
