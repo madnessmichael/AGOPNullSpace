@@ -1,7 +1,7 @@
-# AGOPNullSpace
+# AGOPNullSpace Activation Steering
 
 <p align="center">
-  <b>Activation Steering for LLM Safety via Average Gradient Outer Product with Null-Space Constraint</b>
+  <b>Activation Steering for LLM Safety and Jailbreak via Average Gradient Outer Product with Null-Space Constraint</b>
 </p>
 
 <p align="center">
