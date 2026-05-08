@@ -23,7 +23,9 @@
 **AGOPNullSpace** replaces the difference-in-means refusal direction used in standard activation steering with a kernel-learned direction derived from the **Average Gradient Outer Product (AGOP)** of a Recursive Feature Machine (RFM). The null-space constraint from [AlphaSteer (ICLR 2026)](https://github.com/AlphaLab-USTC/AlphaSteer) is preserved as-is, keeping utility preservation guarantees intact while improving the quality of the refusal direction — particularly against encoding-based attacks such as Cipher.
 
 > **EMNLP 2025 submission:** *One Vector, Two Directions: Nullspace RFM Steering for LLM Safety Alignment and Adversarial Jailbreaking*
-
+<p align="center">
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=22&pause=800&color=FF4D4D&center=true&vCenter=true&width=700&lines=EMNLP+2025+Submission+🔥;FINAL+STRETCH+MODE+ACTIVATED;17+DAYS+REMAINING+⏳+UNTIL+MAY+25;RUSH+%7C+PUSH+%7C+RUN+💨;NO+MORE+DELAY+-+SUBMIT+NOW" />
+</p>
 ---
 
 ## Key Idea
@@ -378,8 +380,3 @@ If you use AGOPNullSpace, please also cite the AlphaSteer paper this work builds
 
 This project is built on top of [AlphaSteer](https://github.com/AlphaLab-USTC/AlphaSteer). The null-space projection and closed-form steering matrix derivation (Eq. 9) are taken directly from that work. AGOPNullSpace contributes the AGOP-based direction computation as a drop-in replacement for the DiffMean step, drawing on the theory of Recursive Feature Machines (Beaglehole et al., Science 2026).
 
----
-
-<p align="center">
-  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=22&pause=1000&color=58A6FF&center=true&vCenter=true&width=600&lines=EMNLP+2025+Submission;17+Days+Until+May+25..." />
-</p>
