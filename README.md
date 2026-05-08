@@ -24,7 +24,7 @@
 
 > **EMNLP 2025 submission:** *One Vector, Two Directions: Nullspace RFM Steering for LLM Safety Alignment and Adversarial Jailbreaking*
 <p align="center">
-  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=22&pause=800&color=FF4D4D&center=true&vCenter=true&width=700&lines=EMNLP+2025+Submission+🔥;FINAL+STRETCH+MODE+ACTIVATED;17+DAYS+REMAINING+⏳+UNTIL+MAY+25;RUSH+%7C+PUSH+%7C+RUN+💨;NO+MORE+DELAY+-+SUBMIT+NOW" />
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=22&pause=650&color=FF3B3B&center=true&vCenter=true&width=850&lines=🚨+EMNLP+2025+DEADLINE+INCOMING+🚨;🗓+DEADLINE:+25-5-2026+ᯓ🏃🏻‍♀️‍➡️;🚀+EXECUTION+MODE:+FULL+SPEED+⚡;🔥+PUSH+CODE+%7C+📄+PUSH+PAPER+%7C+💣+PUSH+LIMITS;⚠️+SUBMISSION+OR+REGRET+💀" />
 </p>
 ---
 
