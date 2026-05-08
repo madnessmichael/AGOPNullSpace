@@ -1,40 +1,14 @@
 # AGOPNullSpace
 
-<p align="center">
-  <b>Activation Steering for LLM Safety via Average Gradient Outer Product with Null-Space Constraint</b>
-</p>
+**Activation Steering for LLM Safety via Average Gradient Outer Product with Null-Space Constraint**
 
-<p align="center">
-  <a href="#results">Results</a> •
-  <a href="#method">Method</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#citation">Citation</a>
-</p>
-
-<p align="center">
-  <img src="figures/fig1_method_overview.png" width="95%" alt="AGOPNullSpace pipeline overview"/>
-</p>
-
----
-
-## Overview
-
-**AGOPNullSpace** replaces the difference-in-means refusal direction used in standard activation steering with a kernel-learned direction derived from the **Average Gradient Outer Product (AGOP)** of a Recursive Feature Machine (RFM). The null-space constraint from [AlphaSteer (ICLR 2026)](https://github.com/AlphaLab-USTC/AlphaSteer) is preserved as-is, keeping utility preservation guarantees intact while improving the quality of the refusal direction — particularly against encoding-based attacks such as Cipher.
-
-> **EMNLP 2025 submission:** *One Vector, Two Directions: Nullspace RFM Steering for LLM Safety Alignment and Adversarial Jailbreaking*
+AGOPNullSpace replaces the difference-in-means refusal direction used in standard activation steering with a kernel-learned direction derived from the **Average Gradient Outer Product (AGOP)** of a Recursive Feature Machine (RFM). The null-space constraint from [AlphaSteer (ICLR 2026)](https://github.com/AlphaLab-USTC/AlphaSteer) is preserved as-is, keeping utility preservation guarantees intact while improving the quality of the refusal direction — particularly against encoding-based attacks such as Cipher.
 
 ---
 
 ## Key Idea
 
 Standard activation steering computes a refusal direction as the mean difference between activations of refused and compliant prompts (DiffMean). This linear estimate works well when the two classes are linearly separable in Euclidean space, but degrades on attacks that obfuscate the surface form of a prompt (Cipher, Base64, role-play encoding).
-
-<p align="center">
-  <img src="figures/fig5_agop_concept.png" width="90%" alt="AGOP direction vs DiffMean concept"/>
-  <br>
-  <em>Fig. 1 — DiffMean misses encoding-obfuscated (Cipher) malicious prompts; AGOP eigenvector captures the encoding-invariant boundary.</em>
-</p>
 
 AGOPNullSpace computes the refusal direction as the **top eigenvector of the AGOP matrix** learned by an iterative kernel regression loop:
 
@@ -68,21 +42,10 @@ Three variants are computed per layer:
 
 ## Results
 
-<p align="center">
-  <img src="figures/table1_dsr.png" width="95%" alt="Table 1: DSR comparison"/>
-</p>
+Evaluated on **Llama-3.1-8B-Instruct** with **Llama-Guard-4-12B** as judge.  
+Baseline = `strength=0.0` (no steering). Numbers are DSR% ↑.
 
-Evaluated on **Llama-3.1-8B-Instruct** with **Llama-Guard-4-12B** as judge. Numbers are DSR% ↑.
-
-### Strength Sweep
-
-<p align="center">
-  <img src="figures/fig2_dsr_sweep.png" width="95%" alt="DSR vs steering strength"/>
-  <br>
-  <em>Fig. 2 — DSR across all 7 attacks as a function of steering strength ε. AGOPNullSpace (blue) reaches higher DSR at lower strength for most attacks. Cipher shows the largest gain.</em>
-</p>
-
-### AlphaSteer Baseline (DiffMean, negative strength convention)
+### AlphaSteer (DiffMean, negative strength convention)
 
 | Strength | AIM | AutoDAN | Cipher | GCG | Jailbroken | PAIR | ReNeLLM |
 |---|---|---|---|---|---|---|---|
@@ -114,72 +77,9 @@ Evaluated on **Llama-3.1-8B-Instruct** with **Llama-Guard-4-12B** as judge. Numb
 
 **Avg best DSR: 98.5%** (+5.2pp over AlphaSteer baseline)
 
-### Cipher Attack: Encoding-Obfuscation Highlight
+**Notable finding:** Cipher DSR goes from 55% (DiffMean) to **100%** (RFM) — a +45pp improvement. The AGOP-learned metric captures the encoding-invariant boundary in activation space that mean difference misses.
 
-<p align="center">
-  <img src="figures/fig3_cipher_highlight.png" width="85%" alt="Cipher DSR comparison"/>
-  <br>
-  <em>Fig. 3 — Cipher DSR: AGOPNullSpace reaches 100% vs AlphaSteer's 55% (+45pp). The AGOP-learned metric captures the encoding-invariant boundary in activation space that mean difference misses.</em>
-</p>
-
-**Notable finding:** Cipher DSR goes from 55% (DiffMean) to **100%** (RFM) — a +45pp improvement.
-
-### Safety vs Utility Trade-off
-
-<p align="center">
-  <img src="figures/fig4_radar.png" width="55%" alt="Safety vs utility radar"/>
-  <br>
-  <em>Fig. 4 — Radar chart: AGOPNullSpace (blue) matches or exceeds AlphaSteer (orange) on safety axes while preserving utility (XSTest, MATH500, GSM8K) via the null-space constraint.</em>
-</p>
-
-### Utility Benchmarks
-
-<p align="center">
-  <img src="figures/table2_utility.png" width="80%" alt="Table 2: Utility benchmarks"/>
-</p>
-
-> **Note on baseline comparison:** The two `strength=0.0` baselines differ slightly (e.g., GCG: 63% vs 93%) due to non-determinism in GCG suffix generation across runs and batch-padding differences for Cipher prompts. Comparisons should be interpreted as per-method delta from each method's own baseline, not absolute DSR.
-
----
-
-## Method
-
-<p align="center">
-  <img src="figures/fig1_method_overview.png" width="95%" alt="Method pipeline"/>
-</p>
-
-The full pipeline proceeds as follows:
-
-**Step 1 — Collect activations.** Extract hidden-state tensors `H_m` (malicious), `H_b` (benign), `H_refuse`, `H_comply` from the target LLM using forward hooks at the steering layers.
-
-**Step 2 — Run RFM loop.** Initialize metric `M = I`. For each of T iterations: solve KRR with the Laplace kernel `K_M`, compute the AGOP matrix `G_t = (1/n) Σ ∇f(xᵢ) ∇f(xᵢ)ᵀ`, update `M ← G_t / ‖G_t‖_F`.
-
-**Step 3 — Extract refusal direction.** `r_rfm = top_eigenvec(M_T)`, oriented so that `sign(Pearson(X @ r_rfm, y_refuse)) > 0`.
-
-**Step 4 — Build null-space projector.** Compute the benign activation covariance, take the 60% lowest eigenvectors `Û`, form `P̂ = Û Ûᵀ`.
-
-**Step 5 — Solve steering matrix.** Apply AlphaSteer Eq. 9 with `r_rfm` in place of `r_dim`:
-```
-Δ* = R H_mᵀ P̂ᵀ (P̂ H_m H_mᵀ P̂ᵀ + α P̂ P̂ᵀ)⁺
-```
-This guarantees `Δ* H_b ≈ 0` (utility preservation) while maximally steering malicious activations toward refusal.
-
----
-
-## Method Comparison
-
-| | AlphaSteer | AGOPNullSpace | RFM-NullProjected | RFM-Naive |
-|---|---|---|---|---|
-| **Refusal direction** | DiffMean | AGOP eigenvec | AGOP eigenvec (projected) | AGOP eigenvec |
-| **Null-space constraint** | ✓ | ✓ | ✓ (enforced pre-RFM) | ✗ |
-| **Utility preservation guarantee** | ✓ | ✓ | ✓ | ✗ |
-| **Direction computation cost** | O(n·d) | O(T·n³) | O(T·n³) | O(T·n³) |
-| **Inference cost (per layer)** | O(d²) | O(d²) | O(d²) | O(d²) |
-| **Cipher DSR (best)** | 55% | 95–100% | — | — |
-| **GCG DSR (best)** | 97% | 93% | — | — |
-| **Avg DSR (best)** | 93.3% | **98.5%** | — | — |
-
-AGOP direction computation is the only step that changes. Null-space projection, steering matrix solve (Eq. 9), and forward hook injection are identical to AlphaSteer.
+> ⚠️ **Note on baseline comparison:** The two baselines at `strength=0.0` differ slightly (e.g., GCG: 63% vs 93%). This is due to non-determinism in GCG suffix generation across runs and batch-padding differences for Cipher prompts. Comparisons should be interpreted as per-method delta from each method's own baseline, not absolute DSR.
 
 ---
 
@@ -204,15 +104,6 @@ AGOPNullSpace/
 │   ├── calc_steering_matrix_rfm.py     # Per-layer pipeline: r_dim, r_rfm, r_rfm_null
 │   └── calc_steering_matrix_rfm_naive.py  # Baseline: r_rfm without null-space (rank-1 Δ*)
 │
-├── figures/                             # Figures and tables for README
-│   ├── fig1_method_overview.png
-│   ├── fig2_dsr_sweep.png
-│   ├── fig3_cipher_highlight.png
-│   ├── fig4_radar.png
-│   ├── fig5_agop_concept.png
-│   ├── table1_dsr.png
-│   └── table2_utility.png
-│
 ├── configs/
 │   ├── llama3.1/                       # Steering layers, strength sweep, model ID
 │   ├── qwen2.5/
@@ -225,10 +116,6 @@ AGOPNullSpace/
 │
 ├── eval/
 │   └── calc_dsr.ipynb                  # DSR evaluation notebook with summary tables
-│
-├── scripts/
-│   ├── gen_tables.py                   # Reproduce Table 1 & 2 as PNG
-│   └── gen_figures.py                  # Reproduce all method figures as PNG
 │
 └── requirements.txt
 ```
@@ -251,7 +138,6 @@ numpy>=1.24.0
 scikit-learn>=1.3.0
 tqdm
 scipy
-matplotlib>=3.7.0   # for gen_tables.py / gen_figures.py
 ```
 
 > The `xrfm` library is optional. If not installed, `compute_agop_direction()` automatically falls back to a logistic regression AGOP (linear, ~10× faster, slightly lower quality on encoding attacks).
@@ -319,17 +205,7 @@ python src/calc_steering_matrix_rfm_naive.py \
 
 > These baselines intentionally have **no utility preservation guarantee**. They exist to isolate the contribution of null-space vs AGOP direction. Expect benign prompts to be affected at higher strengths.
 
-### 4. Reproduce figures and tables
-
-```bash
-# Regenerate all paper figures (saves to figures/)
-python scripts/gen_figures.py
-
-# Regenerate Table 1 & Table 2 as PNG (saves to figures/)
-python scripts/gen_tables.py
-```
-
-### 5. Evaluate DSR
+### 4. Evaluate DSR
 
 Open `eval/calc_dsr.ipynb` and point `INPUT_FILES` to the response JSON files. The notebook prints the full strength-sweep table as shown in the Results section above.
 
@@ -345,6 +221,22 @@ AGOPNullSpace uses **positive** steering strength (ε > 0). This differs from th
 | AGOPNullSpace (AGOP) | `r` oriented via `sign(Pearson(X@r, y_refuse))` → points toward refusal | ε > 0 |
 
 Both result in `h' = h + ε · (h_last @ Δ*)` pushing activations toward refusal. When loading a steering matrix from this repo into AlphaSteer's `AlphaLlamaForCausalLM`, use positive strength values.
+
+---
+
+## Method Comparison
+
+| | AlphaSteer | AGOPNullSpace | RFM-NullProjected | RFM-Naive |
+|---|---|---|---|---|
+| **Refusal direction** | DiffMean | AGOP eigenvec | AGOP eigenvec (projected) | AGOP eigenvec |
+| **Null-space constraint** | ✓ | ✓ | ✓ (enforced pre-RFM) | ✗ |
+| **Utility preservation guarantee** | ✓ | ✓ | ✓ | ✗ |
+| **Direction computation cost** | O(n·d) | O(T·n³) | O(T·n³) | O(T·n³) |
+| **Inference cost (per layer)** | O(d²) | O(d²) | O(d²) | O(d²) |
+| **Cipher DSR (best)** | 55% | 95–100% | — | — |
+| **GCG DSR (best)** | 97% | 93% | — | — |
+
+AGOP direction computation is the only step that changes. Null-space projection, steering matrix solve (Eq. 9), and forward hook injection are identical to AlphaSteer.
 
 ---
 
@@ -364,22 +256,20 @@ Both result in `h' = h + ε · (h_last @ Δ*)` pushing activations toward refusa
 If you use AGOPNullSpace, please also cite the AlphaSteer paper this work builds on:
 
 ```bibtex
-@inproceedings{agopnullspace2025,
-  title     = {One Vector, Two Directions: Nullspace RFM Steering for LLM Safety Alignment and Adversarial Jailbreaking},
-  author    = {<authors>},
-  booktitle = {Proceedings of EMNLP},
-  year      = {2025}
-}
 ```
 
 ---
 
 ## Acknowledgements
 
-This project is built on top of [AlphaSteer](https://github.com/AlphaLab-USTC/AlphaSteer). The null-space projection and closed-form steering matrix derivation (Eq. 9) are taken directly from that work. AGOPNullSpace contributes the AGOP-based direction computation as a drop-in replacement for the DiffMean step, drawing on the theory of Recursive Feature Machines (Beaglehole et al., Science 2026).
+This project is built on top of [AlphaSteer](https://github.com/AlphaLab-USTC/AlphaSteer). The null-space projection and closed-form steering matrix derivation (Eq. 9) are taken directly from that work. AGOPNullSpace contributes the AGOP-based direction computation as a drop-in replacement for the DiffMean step.
 
----
+
+## EMNLP-25/5 Deadline for paper
+**One Vector, Two Directions: Nullspace RFM Steering for LLM Safety Alignment and Adversarial Jailbreaking**
+
+🏃🏻‍♀️ 17 Days Until May 25 🏁
 
 <p align="center">
-  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=22&pause=1000&color=58A6FF&center=true&vCenter=true&width=600&lines=EMNLP+2025+Submission;17+Days+Until+May+25..." />
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=30&pause=1000&color=00C2FF&center=true&vCenter=true&width=600&lines=17+Days+Until+May+25..." />
 </p>
