@@ -13,19 +13,19 @@ DEVICE=cuda
 for file in $TRAIN_VAL_DIR/*.json; do
     filename=$(basename "$file" .json)
     echo "Extracting embeddings for $file"
-    
+
     # Set prompt_column based on filename
     if [[ "$filename" == *"coconot"* ]]; then
         prompt_column="prompt"
     else
         prompt_column="query"
     fi
-    
+
     python src/extract_embeddings.py --model_name $MODEL_NAME \
                                     --input_file $file \
                                     --prompt_column "$prompt_column" \
                                     --output_file $EMBEDDING_DIR/embeds_$filename.pt \
-                                    --batch_size 16 \
+                                    --batch_size 8 \
                                     --device $DEVICE
 done
 

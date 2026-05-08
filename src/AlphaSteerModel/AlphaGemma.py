@@ -113,7 +113,10 @@ class AlphaGemma2DecoderLayer(Gemma2DecoderLayer):
                 batch_size=B,
                 device=device,
             )
+            # Clamp để tránh out of bounds
+            last_idx = last_idx.clamp(0, T - 1)
 
+            
             batch_idx = torch.arange(B, device=device)
             last_hidden = hidden_states[batch_idx, last_idx, :]
             steering_vector = last_hidden @ self.steering_matrix * self.strength

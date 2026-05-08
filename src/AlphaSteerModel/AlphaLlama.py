@@ -29,29 +29,29 @@ __all__ = [
 
 
 class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
-    def __init__(self, config: LlamaConfig, 
-                 layer_idx: int, 
-                 steering_matrix: Optional[torch.Tensor] = None, 
+    def __init__(self, config: LlamaConfig,
+                 layer_idx: int,
+                 steering_matrix: Optional[torch.Tensor] = None,
                  strength: float = 0.0
                  ):
         super().__init__(config, layer_idx)
         self.layer_idx = layer_idx
         # self.steering_vector = None
-        
+
         device = next(self.parameters()).device
         if steering_matrix is not None:
             self.steering_matrix = steering_matrix.to(device)
         else:
             self.steering_matrix = None
         self.strength = strength
-        
-    def set_steering_parameters(self, 
-        steering_matrix: Optional[torch.Tensor]=None, 
+
+    def set_steering_parameters(self,
+        steering_matrix: Optional[torch.Tensor]=None,
         strength: float = 0.0,
         device: Optional[torch.device]=None):
-        
+
         device = next(self.parameters()).device if device is None else device
-        
+
         if steering_matrix is not None and torch.any(steering_matrix):
             self.steering_matrix = steering_matrix.to(device)
         self.strength = strength
@@ -83,13 +83,13 @@ class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
             and torch.any(self.steering_matrix)
             and self.strength != 0.0
         )
-        
+
         if should_apply_steering:
 
             # Only apply steering once during input processing
             if self.steering_matrix.device != hidden_states.device:
                 self.steering_matrix = self.steering_matrix.to(hidden_states.device)
-            
+
             B, T, D = hidden_states.shape
             device = hidden_states.device
 
@@ -113,7 +113,7 @@ class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
             steering_vector = steering_vector.unsqueeze(1)
             # Apply steering by adding the steering vector to hidden states
             hidden_states = hidden_states + steering_vector
-            
+
         residual = hidden_states # resid_pre - save for residual connection
 
         hidden_states = self.input_layernorm(hidden_states)
@@ -129,14 +129,14 @@ class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
             position_embeddings=position_embeddings,
             **kwargs,
         )
-        
+
         hidden_states = residual + hidden_states
         residual = hidden_states # resid_mid - save after attention residual
-        
+
         # Normalize hidden states after attention, then pass through MLP
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
-        
+
         # resid_post - final residual connection
         hidden_states = residual + hidden_states
 
@@ -163,9 +163,9 @@ class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
         Forward pass through the layer, but stop at the MLP output (before residual connection).
         """
         residual = hidden_states # resid pre
-        
+
         hidden_states = self.input_layernorm(hidden_states)
-        
+
         hidden_states, _ = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
@@ -180,9 +180,9 @@ class AlphaLlamaDecoderLayer(LlamaDecoderLayer):
 
         hidden_states = residual + hidden_states
         residual = hidden_states  # Update residual
-        
+
         hidden_states = self.post_attention_layernorm(hidden_states)
-        
+
         mlp_output = self.mlp(hidden_states)
 
         return mlp_output
@@ -193,35 +193,35 @@ class AlphaLlamaModel(LlamaModel):
         # Replace the layers with our custom Alpha layers, keeping everything else unchanged
         self.layers = nn.ModuleList(
             [AlphaLlamaDecoderLayer(
-                config=config, 
+                config=config,
                 layer_idx=layer_idx,
             )
              for layer_idx in range(config.num_hidden_layers)]
         )
 
     def set_steering_parameters(
-        self, 
-        steering_matrix: Optional[torch.Tensor]=None, 
+        self,
+        steering_matrix: Optional[torch.Tensor]=None,
         strength: Optional[list[float]] = None,
         device: Optional[torch.device] = None):
         device = next(self.parameters()).device if device is None else device
-        
+
         if steering_matrix is not None:
             steering_matrix = steering_matrix.to(device)
-        
+
         for layer_idx, layer in enumerate(self.layers):
             layer_steering_matrix = None
             if steering_matrix is not None:
                 layer_steering_matrix = steering_matrix[layer_idx]
-                
+
             layer.set_steering_parameters(
-                steering_matrix=layer_steering_matrix, 
+                steering_matrix=layer_steering_matrix,
                 strength=strength[layer_idx] if strength is not None else 0.0
             )
             torch.cuda.empty_cache()
-        
+
         self.print_steering_parameters()
-        
+
     def print_steering_parameters(self):
         logger.info("Steering Parameters:")
         logger.info(f"{'Layer':<10}{'Strength':<20}{'Steering Matrix (First Element)'}")
@@ -229,13 +229,13 @@ class AlphaLlamaModel(LlamaModel):
         for layer_idx, layer in enumerate(self.layers):
             # Ensure strength is a string or formattable type
             strength_val = str(layer.strength)
-            
+
             if layer.steering_matrix is not None:
                 steering_matrix_str = layer.steering_matrix[0, 0]
             else:
                 steering_matrix_str = "None"
             logger.info(f"{layer_idx:<10}{strength_val:<20}{steering_matrix_str}")
-    
+
 
 
 class AlphaLlamaForCausalLM(LlamaForCausalLM):
@@ -244,7 +244,7 @@ class AlphaLlamaForCausalLM(LlamaForCausalLM):
         self.model = AlphaLlamaModel(config=config)
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, 
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args,
                         steering_matrix: Optional[torch.Tensor] = None,
                         strength: Optional[list[float]] = None,
                         **kwargs):
@@ -254,16 +254,15 @@ class AlphaLlamaForCausalLM(LlamaForCausalLM):
         return model
 
     def set_steering_parameters(
-            self, 
-            steering_matrix: Optional[torch.Tensor]=None, 
+            self,
+            steering_matrix: Optional[torch.Tensor]=None,
             strength: Optional[list[float]] = None):
-        
+
         device = next(self.parameters()).device
         if steering_matrix is not None:
             steering_matrix = steering_matrix.to(device)
         self.model.set_steering_parameters(
-            steering_matrix=steering_matrix, 
+            steering_matrix=steering_matrix,
             strength=strength,
             device=device
         )
-        

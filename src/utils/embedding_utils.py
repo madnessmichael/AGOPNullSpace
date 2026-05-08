@@ -38,10 +38,10 @@ class EmbeddingExtractor:
         
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path,
-            device_map=self.device,
-            torch_dtype=torch.float16
+            device_map="auto",
+            torch_dtype=torch.float16,
         )
-        
+        self.input_device = next(self.model.parameters()).device
         logger.info(f"Model loaded successfully to {self.device}")
         logger.info(f"Number of layers: {self.num_layers}")
     def extract_embeddings(self, prompts, batch_size, layers):
@@ -72,7 +72,7 @@ class EmbeddingExtractor:
                 padding=True,
                 truncation=True,
                 return_tensors="pt"
-            ).to(self.device)
+            ).to(self.input_device)
             
             with torch.no_grad():
                 outputs = self.model(**batch_inputs, output_hidden_states=True)

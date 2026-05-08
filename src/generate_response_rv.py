@@ -1,14 +1,9 @@
 import os
-# import glob
-# # Set GPU
-# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
-import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import glob
 
-import torch._dynamo
-torch._dynamo.config.disable = True  # Tắt hoàn toàn torch.compile
-
+# Set GPU
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
 import argparse
 import yaml
 import json
@@ -24,6 +19,7 @@ from transformers import AutoTokenizer
 from utils.const import AlphaSteer_MODELS_DICT, AlphaSteer_STEERING_LAYERS, Steer_MODELS_DICT, MODELS_DICT
 
 import logging
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +27,6 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
 
 from jinja2 import Template
 
@@ -59,12 +54,13 @@ def load_config(config_path):
         config = yaml.safe_load(file)
     return config
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_path", type=str, help="Path to config file")
     return parser.parse_args()
 
-    
+
 if __name__ == "__main__":
     args = parse_args()
     config = load_config(args.config_path)
@@ -84,10 +80,22 @@ if __name__ == "__main__":
     elif hasattr(args, "steering_vector_path"):
         model_class, config_class, model_id = Steer_MODELS_DICT[args.model_name]
         if os.path.exists(args.steering_vector_path):
-            steering_matrix_or_vector = torch.load(args.steering_vector_path, map_location=args.device)
-            steering_matrix_or_vector = steering_matrix_or_vector.to(torch.bfloat16)
-            logger.info(f"Generate with Naive Steering")
-            steering_layers = [i for i in range(steering_matrix_or_vector.shape[0])]
+            # Sửa: dùng pickle.load thay torch.load cho file .pkl
+            if args.steering_vector_path.endswith(".pkl"):
+                import pickle
+
+                with open(args.steering_vector_path, "rb") as f:
+                    rv_raw = pickle.load(f)
+                steering_matrix_or_vector = torch.tensor(
+                    rv_raw, dtype=torch.bfloat16
+                )
+            else:
+                steering_matrix_or_vector = torch.load(
+                    args.steering_vector_path, map_location=args.device
+                ).to(torch.bfloat16)
+            logging.info(f"RV shape: {steering_matrix_or_vector.shape}")
+            logging.info(f"Generate with Naive Steering (RV)")
+            steering_layers = list(range(steering_matrix_or_vector.shape[0]))
         else:
             raise ValueError("steering_vector_path does not exist")
     else:
@@ -95,23 +103,23 @@ if __name__ == "__main__":
         steering_matrix_or_vector = None
         steering_layers = None
         logger.info(f"Generate without Steering")
-    
+
     config = config_class.from_pretrained(model_id)
     hidden_dim = config.hidden_size
     num_layers = config.num_hidden_layers
-    
+
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
     # tokenizer.padding_side = "right"
     strength = [0.0] * num_layers
-    
+
     model = model_class.from_pretrained(
         model_id,
-        device_map={"": 0},#'auto',
+        device_map='auto',
         torch_dtype=torch.bfloat16
     )
-    
+
     if steering_matrix_or_vector is not None:
         model.set_steering_parameters(
             # steering_matrix_or_vector=steering_matrix_or_vector, # it can be steering_vector or steering_matrix
@@ -122,7 +130,7 @@ if __name__ == "__main__":
         logger.info(f"Generate without Steering")
     model.config.pad_token_id = tokenizer.pad_token_id
     model.config.pad_token = tokenizer.pad_token
-    
+
     with open(args.input_file, "r") as f:
         prompts = json.load(f)
 
@@ -148,7 +156,8 @@ if __name__ == "__main__":
     if "gsm8k" in args.input_file or "math" in args.input_file:
         logger.info("gsm8k or math, use template")
         template = Template(template_jinja)
-        messages = [{"role": "user", "content": template.render(prompt=prompt[args.prompt_column])} for prompt in prompts]
+        messages = [{"role": "user", "content": template.render(prompt=prompt[args.prompt_column])} for prompt in
+                    prompts]
         formatted_prompts = [
             tokenizer.apply_chat_template([message], tokenize=False, add_generation_prompt=True)
             for message in messages
@@ -164,16 +173,15 @@ if __name__ == "__main__":
             tokenizer.apply_chat_template([message], tokenize=False, add_generation_prompt=True)
             for message in messages
         ]
-    
+
     total_batches = (len(formatted_prompts) + args.batch_size - 1) // args.batch_size
-    
 
     if hasattr(args, "strength"):
         const_strength_list = [float(s) for s in args.strength.split(",") if s != ""]
     else:
         logger.info("No strength provided, using default strength")
         const_strength_list = [0.0]
-    
+
     logger.info(f"const_strength_list: {const_strength_list}")
     completed_strengths = []
     batch_idx = 0
@@ -224,7 +232,7 @@ if __name__ == "__main__":
                 # Print progress
                 batch_idx = i // args.batch_size + 1
                 time_per_example = (end_time - start_time) / min(args.batch_size, len(formatted_prompts) - i)
-                
+
                 logger.info(f"Processed batch {batch_idx}/{total_batches}, \
                             time taken: {end_time - start_time:.2f} seconds, \
                             time per example: {time_per_example:.2f} seconds")
@@ -233,9 +241,9 @@ if __name__ == "__main__":
             with open(output_file, "w") as f:
                 json.dump(prompts, f, indent=4)
             logger.info(f"this batch saved to {output_file}")
-                
+
             completed_strengths.append(const_strength)
-            
+
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         logger.error({

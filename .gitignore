@@ -1,11 +1,37 @@
+# Python
 __pycache__/
+*.pyc
+*.pyo
 
-embeddings/
-steering_matrix/
+# Jupyter
+.ipynb_checkpoints/
 
-requirements(drop).txt
+# Logs
+*.log
 
-config/
-responses/
-git_codes/
-data/
+# Virtual env
+venv/
+.env/
+
+# OS
+.DS_Store
+
+# Large model/data artifacts
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.pkl
+
+# Generated outputs
+data/embeddings/
+data/responses/
+data/steering_matrix/
+data/pilot_results/
+
+# Cache
+.cache/
+wandb/
+runs/
+
