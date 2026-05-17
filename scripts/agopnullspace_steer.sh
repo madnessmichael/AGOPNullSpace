@@ -30,18 +30,10 @@ python ./src/calc_steering_matrix_rfm.py \
     --device cuda \
     --save_path data/steering_matrix/steering_matrix_llama3.3-70b_rfm.pt \
     --rfm_method rfm \
-    --layers 28,30,32,34,36,38,40,42,44,46,48,50
 
 
 
-# Steering!
-GENERATE_CONFIG_DIR=config/llama3.3-70b_rfm
-echo "Generating response for $NICKNAME"
-for file in $GENERATE_CONFIG_DIR/*.yaml; do
-    filename=$(basename "$file" .yaml)
-    echo "Generating response for $file"
-    python src/generate_response.py --config_path $file
-done
+GENERATE_CONFIG_DIR=config/llama3.3-70b_rfm && echo "Generating response for $NICKNAME" && for file in $GENERATE_CONFIG_DIR/*.yaml; do filename=$(basename "$file" .yaml); echo "Generating response for $file"; python src/generate_response.py --config_path "$file"; done
 
 
 python ./src/calc_steering_matrix_rfm.py \
@@ -71,7 +63,6 @@ python src/calc_steering_matrix_rfm_no_nullspace.py \
     --device        cuda \
     --save_path     data/steering_matrix/steering_matrix_llama3.3-70b_rfm_no_nullspace.pt \
     --rfm_method    rfm \
-    --layers        28,30,32,34,36,38,40,42,44,46,48,50
 
 
 # Steering!
@@ -92,3 +83,11 @@ python src/calc_steering_matrix_rfm_no_nullspace.py \
     --save_path     data/steering_matrix/steering_matrix_llama3.1_rfm_no_nullspace.pt \
     --rfm_method    rfm
     # llama3.1 extract không dùng --layers → không truyền vào đây
+
+GENERATE_CONFIG_DIR=config/llama3.1_rfm_no_nullspace
+echo "Generating response for $NICKNAME"
+for file in $GENERATE_CONFIG_DIR/*.yaml; do
+    filename=$(basename "$file" .yaml)
+    echo "Generating response for $file"
+    python src/generate_response.py --config_path $file
+done
