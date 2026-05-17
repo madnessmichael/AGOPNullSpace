@@ -40,7 +40,6 @@ python ./src/calc_steering_matrix_rfm.py \
     --save_path data/steering_matrix/steering_matrix_llama3.1_rfm.pt \
     --rfm_method rfm
 
-
 # Steering!
 GENERATE_CONFIG_DIR=config/llama3.1_rfm
 echo "Generating response for $NICKNAME"
@@ -49,11 +48,6 @@ for file in $GENERATE_CONFIG_DIR/*.yaml; do
     echo "Generating response for $file"
     python src/generate_response.py --config_path $file
 done
-
-
-
-
-
 
 
 
