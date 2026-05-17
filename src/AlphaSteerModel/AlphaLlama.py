@@ -209,10 +209,14 @@ class AlphaLlamaModel(LlamaModel):
         if steering_matrix is not None:
             steering_matrix = steering_matrix.to(device)
 
+        # Mới (đúng):
+        steering_indices = {i for i, s in enumerate(strength) if s != 0.0} if strength else set()
+        sm_counter = 0
         for layer_idx, layer in enumerate(self.layers):
             layer_steering_matrix = None
-            if steering_matrix is not None:
-                layer_steering_matrix = steering_matrix[layer_idx]
+            if steering_matrix is not None and layer_idx in steering_indices:
+                layer_steering_matrix = steering_matrix[sm_counter]  # ← đúng, dùng sm_counter
+                sm_counter += 1
 
             layer.set_steering_parameters(
                 steering_matrix=layer_steering_matrix,
