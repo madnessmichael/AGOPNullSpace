@@ -1,8 +1,8 @@
 device: cuda:0
-model_name: llama3.1
-steering_matrix_path: data/steering_matrix/steering_matrix_llama3.1_rfm.pt
+model_name: llama3.3-70b
+steering_matrix_path: data/steering_matrix/steering_matrix_llama3.3-70b_rfm_no_nullspace.pt
 input_file: data/instructions/test/gsm8k_test_sampled.json
-output_file: data/responses/llama3.1/gsm8k_llama3.1_rfm_results.json
+output_file: data/responses/llama3.3-70b/gsm8k_llama3.3-70b_rfm_results.json
 batch_size: 4
 max_new_tokens: 2048
 file_rename: False

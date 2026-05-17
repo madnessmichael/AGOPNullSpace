@@ -1,8 +1,8 @@
 device: cuda:0
-model_name: llama3.3-70b_rfm
-steering_matrix_path: data/steering_matrix/steering_matrix_llama3.3-70b_rfm_rfm.pt
+model_name: llama3.3-70b
+steering_matrix_path: data/steering_matrix/steering_matrix_llama3.3-70b_rfm.pt
 input_file: data/instructions/test/xstest_safe.json
-output_file: data/responses/llama3.3-70b_rfm/xstest_llama3.3-70b_rfm_rfm_results.json
+output_file: data/responses/llama3.3-70b/xstest_llama3.3-70b_rfm_results.json
 batch_size: 16
 max_new_tokens: 128
 file_rename: False
