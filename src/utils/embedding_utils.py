@@ -1,5 +1,4 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5"  # Using GPU 1
 import pandas as pd
 import torch
 import numpy as np

@@ -2,7 +2,7 @@ import os
 import glob
 # Set GPU
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"  # Using GPU 1
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,4,5,7"  # Using GPU 1
 from utils.embedding_utils import EmbeddingExtractor
 import argparse
 import logging 

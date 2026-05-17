@@ -24,10 +24,6 @@ THIẾU SÓT CÒN LẠI (data):
 
 import os
 import glob
-
-# Set GPU
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"  # Using GPU 1
 import argparse
 import pickle
 import argparse
@@ -236,6 +232,7 @@ def compute_rfm_refusal_vectors(
     method:           str = "linear",
     rfm_iters:        int = 3,
     device:           str = "cpu",
+    layer_to_local: dict = None,  # thêm tham số này
 ) -> np.ndarray:
     """
     Compute RFM refusal direction cho mỗi layer.
@@ -249,8 +246,10 @@ def compute_rfm_refusal_vectors(
     for layer_idx in layers:
         logger.info("=== Layer %d ===", layer_idx)
 
-        h_pos = H_refusal[:, layer_idx, :].float()   # CPU
-        h_neg = H_compliant[:, layer_idx, :].float()  # CPU
+        local_idx = layer_to_local[layer_idx] if layer_to_local else layer_idx  # thêm dòng này
+
+        h_pos = H_refusal[:, local_idx, :].float()   # CPU
+        h_neg = H_compliant[:, local_idx, :].float()  # CPU
 
         # Balance
         n_min = min(len(h_pos), len(h_neg))
@@ -266,8 +265,8 @@ def compute_rfm_refusal_vectors(
         else:
             raise ValueError(f"Unknown method: {method}")
 
-        refusal_vectors[layer_idx] = r.float().numpy()
-        logger.info("  r[%d] norm=%.6f", layer_idx, np.linalg.norm(refusal_vectors[layer_idx]))
+        refusal_vectors[local_idx] = r.float().numpy()
+        logger.info("  r[%d] norm=%.6f", layer_idx, np.linalg.norm(refusal_vectors[local_idx]))
 
     return refusal_vectors
 

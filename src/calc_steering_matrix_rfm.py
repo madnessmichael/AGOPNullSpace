@@ -38,7 +38,7 @@ import glob
 
 # Set GPU
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,4,5,7"  # Using GPU 1
 import argparse
 import sys
 import argparse
@@ -85,6 +85,7 @@ def parse_args():
     p.add_argument("--rfm_iters",      type=int, default=3)
     p.add_argument("--lambda_reg",     type=float, default=10.0)
     p.add_argument("--seed",           type=int, default=42)
+    p.add_argument("--layers",         type=str, required=False, default=None, help="Comma-separated layers dùng lúc extract embeddings")
     return p.parse_args()
 
 
@@ -96,6 +97,18 @@ if __name__ == "__main__":
 
     device = torch.device(args.device)
     layers_ratio_list = AlphaSteer_CALCULATION_CONFIG[args.model_name]  # [(layer, ratio), ...]
+
+    # Build local index mapping
+    if args.layers is not None:
+        layers_abs = [int(l.strip()) for l in args.layers.split(',')]
+        layer_to_local = {abs_l: i for i, abs_l in enumerate(layers_abs)}
+        logger.info("Using --layers mapping: %s", layer_to_local)
+    else:
+        layer_to_local = {layer: layer for layer, _ in layers_ratio_list}
+        logger.info("No --layers passed, using absolute indexing")
+
+
+
     embeds_dir = args.embedding_dir
 
     # ── 1. Load embeddings — giống gốc dòng 3905-3929 ───────────────────────
@@ -144,6 +157,8 @@ if __name__ == "__main__":
     logger.info("Computing RFM refusal vectors (method=%s)...", args.rfm_method)
 
     H_refusal_cpu, H_compliant_cpu = load_alphasteer_embeddings(embeds_dir)
+
+
     num_total_layers = H_benign_train.shape[1]
     d_model = H_benign_train.shape[2]
 
@@ -155,6 +170,7 @@ if __name__ == "__main__":
         method=args.rfm_method,
         rfm_iters=args.rfm_iters,
         device=args.device,
+        layer_to_local=layer_to_local,  # thêm dòng này
     )
     H_refusal_cpu = None
     H_compliant_cpu = None
@@ -170,30 +186,31 @@ if __name__ == "__main__":
     steering_matrix = torch.zeros(num_total_layers, d_model, d_model, device="cpu")
 
     for layer, ratio in layers_ratio_list:
-        logger.info("layer=%d  null_ratio=%.1f", layer, ratio)
+        local_idx = layer_to_local[layer]
+        logger.info("layer=%d (local_idx=%d)  null_ratio=%.1f", layer, local_idx, ratio)
 
         # Null-space projection (giống gốc dòng 3953)
         P_layer = null_space_projection_l(
-            H_benign_train[:, layer, :].to(args.device),
+            H_benign_train[:, local_idx, :].to(args.device),
             abs_nullspace_ratio=ratio
         )
-        P[layer] = P_layer
+        P[local_idx] = P_layer
         logger.info("  P_norm=%.4f", torch.norm(P_layer).item())
 
         # FIX C2: per-layer call giống gốc dòng 3959-3960
         tilde_delta_layer = cal_tilde_delta_with_regularization_l(
-            H_harmful_train[:, layer, :].to(args.device),
+            H_harmful_train[:, local_idx, :].to(args.device),
             P_layer,
-            refusal_vectors[layer],
+            refusal_vectors[local_idx],
             lambda_reg=args.lambda_reg,
             device=args.device,
         )
-        tilde_delta[layer] = tilde_delta_layer
+        tilde_delta[local_idx] = tilde_delta_layer
         logger.info("  tilde_delta_norm=%.4f", torch.norm(tilde_delta_layer).item())
 
         # Steering matrix (giống gốc dòng 3967-3968)
         steering_matrix_layer = cal_steering_matrix_l(P_layer, tilde_delta_layer, device=args.device)
-        steering_matrix[layer] = steering_matrix_layer
+        steering_matrix[local_idx] = steering_matrix_layer
         logger.info("  steering_matrix_norm=%.4f", torch.norm(steering_matrix_layer).item())
 
 

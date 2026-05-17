@@ -10,16 +10,16 @@ So với calc_steering_matrix_rfm.py (có NullSpace):
            hoặc dùng trực tiếp cal_steering_matrix_l(I, tilde_delta_direct)
 
 Logic mới tại mỗi layer:
-    r  = refusal_vectors[layer]          # (d,)
+    r  = refusal_vectors[local_idx]          # (d,)
     # tilde_delta = giải least-squares H_harmful @ M ≈ r (không chiếu null-space)
     # Cách đơn giản nhất: M = rᵀ / ||H_harmful||² * H_harmful  (ridge regression, P=I)
-    tilde_delta_layer = cal_tilde_delta_with_regularization_l(
-        H_harmful[:, layer, :],
+    tilde_delta = cal_tilde_delta_with_regularization_l(
+        H_harmful[:, local_idx, :],
         P=I_d,                    # identity — không chiếu null-space
         refusal_vec=r,
         lambda_reg=...,
     )
-    steering_matrix[layer] = cal_steering_matrix_l(I_d, tilde_delta_layer)
+    steering_matrix[local_idx] = cal_steering_matrix_l(I_d, tilde_delta)
 
 Cách dùng:
     python src/calc_steering_matrix_rfm_no_nullspace.py \\
@@ -40,10 +40,8 @@ import argparse
 import numpy as np
 import torch
 
-torch.manual_seed(42)
-
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
@@ -53,9 +51,7 @@ from utils.steering_utils import (
     cal_steering_matrix_l,
 )
 from rfm_refusal_vector import (
-    load_alphasteer_embeddings,
     compute_rfm_refusal_vectors,
-    STEERING_LAYERS,
 )
 
 logging.basicConfig(
@@ -67,14 +63,16 @@ logger = logging.getLogger(__name__)
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--model_name",    required=True)
+    p.add_argument("--model_name", required=True)
     p.add_argument("--embedding_dir", required=True)
-    p.add_argument("--device",        default="cuda")
-    p.add_argument("--save_path",     required=True)
-    p.add_argument("--rfm_method",    default="rfm", choices=["linear", "rfm"])
-    p.add_argument("--rfm_iters",     type=int,   default=3)
-    p.add_argument("--lambda_reg",    type=float, default=10.0)
-    p.add_argument("--seed",          type=int,   default=42)
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--save_path", required=True)
+    p.add_argument("--rfm_method", default="rfm", choices=["linear", "rfm"])
+    p.add_argument("--rfm_iters", type=int, default=3)
+    p.add_argument("--lambda_reg", type=float, default=10.0)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--layers", type=str, required=False, default=None,
+                   help="Comma-separated layers dùng lúc extract embeddings")
     return p.parse_args()
 
 
@@ -88,7 +86,16 @@ if __name__ == "__main__":
     layers_ratio_list = AlphaSteer_CALCULATION_CONFIG[args.model_name]
     embeds_dir = args.embedding_dir
 
-    # ── 1. Load embeddings lên CPU (layer-by-layer strategy) ────────────────
+    # Build local index mapping
+    if args.layers is not None:
+        layers_abs = [int(l.strip()) for l in args.layers.split(',')]
+        layer_to_local = {abs_l: i for i, abs_l in enumerate(layers_abs)}
+        logger.info("Using --layers mapping: %s", layer_to_local)
+    else:
+        layer_to_local = {layer: layer for layer, _ in layers_ratio_list}
+        logger.info("No --layers passed, using absolute indexing")
+
+    # ── 1. Load embeddings lên CPU ───────────────────────────────────────────
     logger.info("Loading benign embeddings to CPU...")
     H_benign_train_10000 = torch.load(
         f"{embeds_dir}/embeds_benign_train.pt", map_location="cpu").float()
@@ -103,7 +110,7 @@ if __name__ == "__main__":
         H_benign_train_10000,
         H_coconot_original[indices_borderline],
         H_coconot_pref,
-    ], dim=0)  # kept on CPU
+    ], dim=0)
 
     del H_benign_train_10000, H_coconot_pref, H_coconot_original
     gc.collect()
@@ -125,23 +132,22 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
     logger.info("H_harmful_train shape: %s", tuple(H_harmful_train.shape))
 
-    # ── 2. Compute RFM refusal vectors ──────────────────────────────────────
-    logger.info("Computing RFM refusal vectors (method=%s)...", args.rfm_method)
-    H_refusal_cpu, H_compliant_cpu = load_alphasteer_embeddings(embeds_dir)
+    num_total_layers = H_harmful_train.shape[1]
+    d_model = H_harmful_train.shape[2]
 
-    num_total_layers = H_benign_train.shape[1]
-    d_model          = H_benign_train.shape[2]
+    # ── 2. Compute RFM refusal vectors — dùng lại H đã load, không load lại ─
+    logger.info("Computing RFM refusal vectors (method=%s)...", args.rfm_method)
 
     refusal_vectors_np = compute_rfm_refusal_vectors(
-        H_refusal=H_refusal_cpu,
-        H_compliant=H_compliant_cpu,
+        H_refusal=H_harmful_train,
+        H_compliant=H_benign_train,
         layers=[layer for layer, _ in layers_ratio_list],
         num_total_layers=num_total_layers,
         method=args.rfm_method,
         rfm_iters=args.rfm_iters,
         device=args.device,
+        layer_to_local=layer_to_local,
     )
-    del H_refusal_cpu, H_compliant_cpu
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -149,50 +155,39 @@ if __name__ == "__main__":
         refusal_vectors_np, dtype=torch.float32).to(device)
     logger.info("refusal_vectors shape: %s", tuple(refusal_vectors.shape))
 
-    # ── 3. Steering matrix — NO NullSpace projection ─────────────────────────
-    # Thay vì P = null_space_projection_l(H_benign), dùng P = Identity.
-    # cal_tilde_delta_with_regularization_l(H_harmful, I, r) giải:
-    #   min_M  ||H_harmful @ M - r||² + λ||M||²
-    # Kết quả: M = (HᵀH + λI)⁻¹ Hᵀ r  (ridge regression thuần)
-    # cal_steering_matrix_l(I, tilde_delta) → steering = tilde_delta (no masking)
+    # ── 3. Steering matrix — NO NullSpace, P = Identity ──────────────────────
+    steering_matrix = torch.zeros(num_total_layers, d_model, d_model, device="cpu")
+    I_d = torch.eye(d_model, device=device)
 
-    steering_matrix = torch.zeros(
-        num_total_layers, d_model, d_model, device="cpu")
+    for layer, _ in layers_ratio_list:
+        local_idx = layer_to_local[layer]
+        logger.info("layer=%d (local_idx=%d) — no nullspace", layer, local_idx)
 
-    I_d = torch.eye(d_model, device=device)  # identity — thay cho P_layer
+        harmful_layer = H_harmful_train[:, local_idx, :].to(device)
 
-    for layer, _ in layers_ratio_list:   # ratio bỏ qua vì không cần NullSpace
-        logger.info("Processing layer=%d (no nullspace)", layer)
-
-        harmful_layer = H_harmful_train[:, layer, :].to(device)  # (N, d)
-
-        # Ridge regression: no projection, P = Identity
         tilde_delta_layer = cal_tilde_delta_with_regularization_l(
             harmful_layer,
             I_d,
-            refusal_vectors[layer],
+            refusal_vectors[local_idx],
             lambda_reg=args.lambda_reg,
             device=args.device,
         )
-        logger.info("  tilde_delta_norm=%.4f",
-                    torch.norm(tilde_delta_layer).item())
+        logger.info("  tilde_delta_norm=%.4f", torch.norm(tilde_delta_layer).item())
 
-        # Steering matrix = I @ tilde_delta = tilde_delta (no nullspace masking)
         steering_matrix_layer = cal_steering_matrix_l(
             I_d, tilde_delta_layer, device=args.device)
-        steering_matrix[layer] = steering_matrix_layer.cpu()
-        logger.info("  steering_matrix_norm=%.4f",
-                    torch.norm(steering_matrix_layer).item())
+        steering_matrix[local_idx] = steering_matrix_layer.cpu()
+        logger.info("  steering_matrix_norm=%.4f", torch.norm(steering_matrix_layer).item())
 
         del harmful_layer, tilde_delta_layer, steering_matrix_layer
         torch.cuda.empty_cache()
 
     # ── 4. Save ──────────────────────────────────────────────────────────────
     os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    torch.save(steering_matrix, args.save_path)   # float32
+    torch.save(steering_matrix, args.save_path)
     logger.info("Saved → %s", args.save_path)
     logger.info("Total time: %.1fs", time.time() - t0)
 
-    del H_benign_train, H_harmful_train, steering_matrix, I_d
+    del H_benign_train, H_harmful_train, steering_matrix, I_d, refusal_vectors
     gc.collect()
     torch.cuda.empty_cache()
