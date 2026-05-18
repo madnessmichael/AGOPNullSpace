@@ -161,6 +161,6 @@ for file in $TRAIN_VAL_DIR/*.json; do
                                  --input_file $file \
                                  --prompt_column "$prompt_column" \
                                  --output_file $EMBEDDING_DIR/embeds_$filename.pt \
-                                 --batch_size 4 \
+                                 --batch_size 64 \
                                  --device $DEVICE
 done
