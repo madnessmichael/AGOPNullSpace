@@ -142,7 +142,6 @@ NICKNAME=llama3.3-70b
 MODEL_NAME=unsloth/Llama-3.3-70B-Instruct-bnb-4bit  # Model name from HuggingFace
 
 DEVICE=cuda
-LAYERS="28,30,32,34,36,38,40,42,44,46,48,50"
 
 
 
@@ -162,7 +161,6 @@ for file in $TRAIN_VAL_DIR/*.json; do
                                  --input_file $file \
                                  --prompt_column "$prompt_column" \
                                  --output_file $EMBEDDING_DIR/embeds_$filename.pt \
-                                 --batch_size 2 \
-                                 --layers $LAYERS \
+                                 --batch_size 4 \
                                  --device $DEVICE
 done
