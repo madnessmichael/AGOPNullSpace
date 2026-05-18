@@ -1,7 +1,7 @@
-# AGOPNullSpace Activation Steering
+# Beyond Behavioral Refusal Directions: Null-Space Constrained Safety Steering with Recursive Feature Machines
 
 <p align="center">
-  <b>Activation Steering for LLM Safety and Jailbreak via Average Gradient Outer Product with Null-Space Constraint</b>
+  <b>AGOPN: Null-Space Constrained Safety Steering with Recursive Feature Machines</b>
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
   <img src="figures/fig1_method_overview.png" width="95%" alt="AGOPNullSpace pipeline overview"/>
 </p>
 
-> **EMNLP 2025 submission:** *One Vector, Two Directions: Nullspace RFM Steering for LLM Safety Alignment and Adversarial Jailbreaking*
+> **EMNLP 2025 submission:** *Beyond Behavioral Refusal Directions: Null-Space Constrained Safety Steering with Recursive Feature Machines*
 <p align="center">
   <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=22&pause=650&color=FF3B3B&center=true&vCenter=true&width=850&lines=🚨+EMNLP+2025+DEADLINE+INCOMING+🚨;🗓+DEADLINE:+25-5-2026+ᯓ🏃🏻‍♀️‍➡️;🚀+EXECUTION+MODE:+FULL+SPEED+⚡;🔥+PUSH+CODE+%7C+📄+PUSH+PAPER+%7C+💣+PUSH+LIMITS;⚠️+SUBMISSION+OR+REGRET+💀" />
 </p>
