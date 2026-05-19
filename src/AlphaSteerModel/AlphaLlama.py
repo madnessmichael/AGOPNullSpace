@@ -206,19 +206,28 @@ class AlphaLlamaModel(LlamaModel):
         device: Optional[torch.device] = None):
         device = next(self.parameters()).device if device is None else device
         
-        if steering_matrix is not None:
-            steering_matrix = steering_matrix.to(device)
+        # if steering_matrix is not None:
+        #     steering_matrix = steering_matrix.to(device)
         
+        # for layer_idx, layer in enumerate(self.layers):
+        #     layer_steering_matrix = None
+        #     if steering_matrix is not None:
+        #         layer_steering_matrix = steering_matrix[layer_idx]
+                
+        #     layer.set_steering_parameters(
+        #         steering_matrix=layer_steering_matrix, 
+        #         strength=strength[layer_idx] if strength is not None else 0.0
+        #     )
+        #     torch.cuda.empty_cache()
         for layer_idx, layer in enumerate(self.layers):
             layer_steering_matrix = None
             if steering_matrix is not None:
-                layer_steering_matrix = steering_matrix[layer_idx]
-                
+                layer_steering_matrix = steering_matrix[layer_idx].to(device)
             layer.set_steering_parameters(
-                steering_matrix=layer_steering_matrix, 
+                steering_matrix=layer_steering_matrix,
                 strength=strength[layer_idx] if strength is not None else 0.0
             )
-            torch.cuda.empty_cache()
+            torch.cuda.empty_cache()  # đã có sẵn, giữ lại
         
         self.print_steering_parameters()
         
@@ -259,8 +268,8 @@ class AlphaLlamaForCausalLM(LlamaForCausalLM):
             strength: Optional[list[float]] = None):
         
         device = next(self.parameters()).device
-        if steering_matrix is not None:
-            steering_matrix = steering_matrix.to(device)
+        # if steering_matrix is not None:
+        #     steering_matrix = steering_matrix.to(device)
         self.model.set_steering_parameters(
             steering_matrix=steering_matrix, 
             strength=strength,

@@ -1,6 +1,8 @@
 import os
 # import glob
 # # Set GPU
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
 import os
@@ -75,7 +77,7 @@ if __name__ == "__main__":
     if hasattr(args, "steering_matrix_path"):
         model_class, config_class, model_id = AlphaSteer_MODELS_DICT[args.model_name]
         if os.path.exists(args.steering_matrix_path):
-            steering_matrix_or_vector = torch.load(args.steering_matrix_path, map_location=args.device)
+            steering_matrix_or_vector = torch.load(args.steering_matrix_path, map_location="cpu")
             steering_matrix_or_vector = steering_matrix_or_vector.to(torch.bfloat16)
             logger.info(f"Generate with Null Space Steering")
             steering_layers = AlphaSteer_STEERING_LAYERS[args.model_name]
@@ -84,7 +86,7 @@ if __name__ == "__main__":
     elif hasattr(args, "steering_vector_path"):
         model_class, config_class, model_id = Steer_MODELS_DICT[args.model_name]
         if os.path.exists(args.steering_vector_path):
-            steering_matrix_or_vector = torch.load(args.steering_vector_path, map_location=args.device)
+            steering_matrix_or_vector = torch.load(args.steering_vector_path, map_location="cpu")
             steering_matrix_or_vector = steering_matrix_or_vector.to(torch.bfloat16)
             logger.info(f"Generate with Naive Steering")
             steering_layers = [i for i in range(steering_matrix_or_vector.shape[0])]
@@ -109,6 +111,7 @@ if __name__ == "__main__":
     model = model_class.from_pretrained(
         model_id,
         device_map={"": 0},#'auto',
+        max_memory={0: "43GiB"},
         torch_dtype=torch.bfloat16
     )
     
