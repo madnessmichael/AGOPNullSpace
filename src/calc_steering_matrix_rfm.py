@@ -38,7 +38,7 @@ import glob
 
 # Set GPU
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,4,5,7"  # Using GPU 1
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
 import argparse
 import sys
 import argparse
@@ -98,26 +98,32 @@ if __name__ == "__main__":
     layers_ratio_list = AlphaSteer_CALCULATION_CONFIG[args.model_name]  # [(layer, ratio), ...]
     embeds_dir = args.embedding_dir
 
-    # ── 1. Load embeddings — giống gốc dòng 3905-3929 ───────────────────────
-    # FIX C1: load trực tiếp sang device như gốc (map_location=device)
-    logger.info("Loading embeddings...")
+    # ── 1. Load embeddings ───────────────────────────────────────────────────
+    # FIX OOM (70B): load tất cả lên CPU trước, ghép xong mới move sang GPU.
+    # Với 70B model VRAM đã bị chiếm ~37 GiB, không thể load 14 GiB tensor
+    # thẳng lên CUDA. H_benign_train / H_harmful_train ở lại CPU;
+    # chỉ move từng slice [:, layer, :] lên GPU bên trong vòng for ở bước 3.
+    logger.info("Loading embeddings (all to CPU to avoid OOM on 70B)...")
 
     H_benign_train_10000 = torch.load(
-        f"{embeds_dir}/embeds_benign_train.pt", map_location=device).float()
+        f"{embeds_dir}/embeds_benign_train.pt", map_location="cpu").float()
     H_coconot_pref = torch.load(
-        f"{embeds_dir}/embeds_coconot_pref.pt", map_location=device).float()
+        f"{embeds_dir}/embeds_coconot_pref.pt", map_location="cpu").float()
     H_coconot_original = torch.load(
-        f"{embeds_dir}/embeds_coconot_original.pt", map_location=device).float()
+        f"{embeds_dir}/embeds_coconot_original.pt", map_location="cpu").float()
 
     indices_borderline = torch.randperm(H_coconot_original.size(0))[:4000 - H_coconot_pref.size(0)]
     H_benign_train = torch.cat([
         H_benign_train_10000,
         H_coconot_original[indices_borderline],
         H_coconot_pref
-    ], dim=0).to(device)
+    ], dim=0)  # giữ trên CPU
 
-    logger.info("H_benign_train shape: %s", tuple(H_benign_train.shape))
+    H_benign_train_10000 = None
+    H_coconot_original = None
+    H_coconot_pref = None
     torch.cuda.empty_cache()
+    logger.info("H_benign_train shape: %s  (CPU)", tuple(H_benign_train.shape))
 
     H_harmful_train_1000 = torch.load(
         f"{embeds_dir}/embeds_harmful_train_1000.pt", map_location="cpu").float()
@@ -126,13 +132,13 @@ if __name__ == "__main__":
 
     indices = torch.randperm(H_jailbreak_train_full.size(0))[:1000]
     H_jailbreak_train = H_jailbreak_train_full[indices]
-    H_harmful_train = torch.cat([H_harmful_train_1000, H_jailbreak_train], dim=0)
+    H_harmful_train = torch.cat([H_harmful_train_1000, H_jailbreak_train], dim=0)  # CPU
 
-    # Cleanup như gốc dòng 3928-3929
     H_harmful_train_1000 = None
     H_jailbreak_train_full = None
+    H_jailbreak_train = None
     torch.cuda.empty_cache()
-    logger.info("H_harmful_train shape: %s", tuple(H_harmful_train.shape))
+    logger.info("H_harmful_train shape: %s  (CPU)", tuple(H_harmful_train.shape))
 
     # ── 2. Compute RFM refusal vectors ──────────────────────────────────────
     # *** ĐIỂM THAY ĐỔI DUY NHẤT so với gốc ***

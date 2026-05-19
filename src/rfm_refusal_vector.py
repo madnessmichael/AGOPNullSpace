@@ -27,7 +27,7 @@ import glob
 
 # Set GPU
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"  # Using GPU 1
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
 import argparse
 import pickle
 import argparse
