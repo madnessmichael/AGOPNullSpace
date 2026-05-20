@@ -1,16 +1,4 @@
 import os
-# import glob
-# # Set GPU
-import os
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"  # Using GPU 1
-import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-import torch._dynamo
-torch._dynamo.config.disable = True  # Tắt hoàn toàn torch.compile
-
 import argparse
 import yaml
 import json
@@ -26,14 +14,12 @@ from transformers import AutoTokenizer
 from utils.const import AlphaSteer_MODELS_DICT, AlphaSteer_STEERING_LAYERS, Steer_MODELS_DICT, MODELS_DICT
 
 import logging
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
 
 from jinja2 import Template
 
@@ -44,19 +30,7 @@ This is the problem:
 Please remember to put your final answer within \\boxed{}
 """
 
-
 def load_config(config_path):
-    '''
-    Expected arguments in config:
-        device: device to use
-        model_name: model name
-        steering_matrix_path: path to steering matrix
-        input_file: path to input file
-        output_file: path to output file
-        batch_size: batch size
-        max_new_tokens: maximum number of tokens to generate
-        prompt_column: name of prompt column
-    '''
     with open(config_path, 'r') as file:
         config = yaml.safe_load(file)
     return config
@@ -74,10 +48,13 @@ if __name__ == "__main__":
         setattr(args, key, value)
     logger.info(f"args: {args}")
 
+    # BẮT BẪY MULTI-GPU: Tránh load thẳng ma trận vào thiết bị mang chữ "auto"
+    load_device = "cpu" if args.device == "auto" else args.device
+
     if hasattr(args, "steering_matrix_path"):
         model_class, config_class, model_id = AlphaSteer_MODELS_DICT[args.model_name]
         if os.path.exists(args.steering_matrix_path):
-            steering_matrix_or_vector = torch.load(args.steering_matrix_path, map_location="cpu")
+            steering_matrix_or_vector = torch.load(args.steering_matrix_path, map_location=load_device)
             steering_matrix_or_vector = steering_matrix_or_vector.to(torch.bfloat16)
             logger.info(f"Generate with Null Space Steering")
             steering_layers = AlphaSteer_STEERING_LAYERS[args.model_name]
@@ -86,7 +63,7 @@ if __name__ == "__main__":
     elif hasattr(args, "steering_vector_path"):
         model_class, config_class, model_id = Steer_MODELS_DICT[args.model_name]
         if os.path.exists(args.steering_vector_path):
-            steering_matrix_or_vector = torch.load(args.steering_vector_path, map_location="cpu")
+            steering_matrix_or_vector = torch.load(args.steering_vector_path, map_location=load_device)
             steering_matrix_or_vector = steering_matrix_or_vector.to(torch.bfloat16)
             logger.info(f"Generate with Naive Steering")
             steering_layers = [i for i in range(steering_matrix_or_vector.shape[0])]
@@ -105,19 +82,17 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
-    # tokenizer.padding_side = "right"
     strength = [0.0] * num_layers
     
+    # Khởi tạo mô hình với cấu hình Multi-GPU động
     model = model_class.from_pretrained(
         model_id,
-        device_map={"": 0},#'auto',
-        max_memory={0: "43GiB"},
+        device_map=args.device, # Nhận "auto" hoặc "cuda:X" mượt mà
         torch_dtype=torch.bfloat16
     )
     
     if steering_matrix_or_vector is not None:
         model.set_steering_parameters(
-            # steering_matrix_or_vector=steering_matrix_or_vector, # it can be steering_vector or steering_matrix
             steering_matrix_or_vector,
             strength=strength
         )
@@ -156,13 +131,9 @@ if __name__ == "__main__":
             tokenizer.apply_chat_template([message], tokenize=False, add_generation_prompt=True)
             for message in messages
         ]
-    # elif "advprompt" in args.input_file or "gcg" in args.input_file:
-    #     logger.info("advprompt or gcg, use original prompt directly")
-    #     formatted_prompts = [prompt[args.prompt_column] for prompt in prompts]
     else:
         logger.info("use template")
         messages = [{"role": "user", "content": prompt[args.prompt_column]} for prompt in prompts]
-
         formatted_prompts = [
             tokenizer.apply_chat_template([message], tokenize=False, add_generation_prompt=True)
             for message in messages
@@ -170,7 +141,6 @@ if __name__ == "__main__":
     
     total_batches = (len(formatted_prompts) + args.batch_size - 1) // args.batch_size
     
-
     if hasattr(args, "strength"):
         const_strength_list = [float(s) for s in args.strength.split(",") if s != ""]
     else:
@@ -191,19 +161,22 @@ if __name__ == "__main__":
 
             for i in range(0, len(formatted_prompts), args.batch_size):
                 batch_prompts = formatted_prompts[i:i + args.batch_size]
+                
+                # BẮT BẪY MULTI-GPU: Định vị đúng GPU cổng vào (Thường là vị trí của lớp Embedding)
+                input_device = next(model.parameters()).device if args.device == "auto" else args.device
+
                 batch_inputs = tokenizer(
                     batch_prompts,
                     padding=True,
                     truncation=True,
                     return_tensors="pt"
-                ).to(args.device)
+                ).to(input_device) # Đẩy tensor input vào đúng GPU đón nhận ban đầu
 
                 input_lengths = [len(input_ids) for input_ids in batch_inputs["input_ids"]]
                 batch_input_ids = batch_inputs["input_ids"]
                 batch_attention_mask = batch_inputs["attention_mask"]
 
                 start_time = time.time()
-                # Generate with model
                 batch_outputs = model.generate(
                     input_ids=batch_input_ids,
                     attention_mask=batch_attention_mask,
@@ -214,17 +187,14 @@ if __name__ == "__main__":
                 )
                 end_time = time.time()
 
-                # Process generation results
                 for j, output in enumerate(batch_outputs):
                     generated_part = output[input_lengths[j]:]
                     response = tokenizer.decode(generated_part, skip_special_tokens=True)
                     prompts[i + j][f"response_strength:{const_strength}"] = response
 
-                # Free GPU memory
                 del batch_outputs, batch_input_ids, batch_attention_mask
                 torch.cuda.empty_cache()
 
-                # Print progress
                 batch_idx = i // args.batch_size + 1
                 time_per_example = (end_time - start_time) / min(args.batch_size, len(formatted_prompts) - i)
                 
@@ -232,7 +202,6 @@ if __name__ == "__main__":
                             time taken: {end_time - start_time:.2f} seconds, \
                             time per example: {time_per_example:.2f} seconds")
 
-            # Save results directly to output file
             with open(output_file, "w") as f:
                 json.dump(prompts, f, indent=4)
             logger.info(f"this batch saved to {output_file}")
