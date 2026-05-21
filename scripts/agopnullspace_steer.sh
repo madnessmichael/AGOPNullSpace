@@ -4,7 +4,7 @@
 ############### AlphaSteer ########################
 
 
-# llama3.1
+# ── llama3.1-8b ─────────────────────────────────────────────────────────────────
 python src/calc_steering_matrix.py \
     --model_name    llama3.1 \
     --embedding_dir data/embeddings/llama3.1 \
@@ -15,7 +15,7 @@ python src/calc_steering_matrix.py \
 ############### AGOP WITH NULLSPACE ########################
 
 
-
+# ── llama3.3-70b ─────────────────────────────────────────────────────────────
 python ./src/calc_steering_matrix_rfm.py \
     --model_name llama3.3-70b \
     --embedding_dir data/embeddings/llama3.3-70b \
@@ -23,6 +23,8 @@ python ./src/calc_steering_matrix_rfm.py \
     --save_path data/steering_matrix/steering_matrix_llama3.3-70b_rfm.pt \
     --rfm_method rfm \
 
+
+# ── llama3.1-70b ─────────────────────────────────────────────────────────────
 python ./src/calc_steering_matrix_rfm.py \
     --model_name llama3.1-70b \
     --embedding_dir data/embeddings/llama3.1-70b \
@@ -30,7 +32,7 @@ python ./src/calc_steering_matrix_rfm.py \
     --save_path data/steering_matrix/steering_matrix_llama3.1-70b_rfm.pt \
     --rfm_method rfm \
 
-
+# ── llama3.1-8b ─────────────────────────────────────────────────────────────────
 python ./src/calc_steering_matrix_rfm.py \
     --model_name llama3.1 \
     --embedding_dir data/embeddings/llama3.1 \
@@ -51,7 +53,7 @@ python src/calc_steering_matrix_rfm_no_nullspace.py \
     --rfm_method    rfm \
 
 
-# ── llama3.3-70b ─────────────────────────────────────────────────────────────
+# ── llama3.1-70b ─────────────────────────────────────────────────────────────
 python src/calc_steering_matrix_rfm_no_nullspace.py \
     --model_name    llama3.1-70b \
     --embedding_dir data/embeddings/llama3.1-70b \
@@ -60,9 +62,7 @@ python src/calc_steering_matrix_rfm_no_nullspace.py \
     --rfm_method    rfm \
 
 
-
-
-# ── llama3.1 ─────────────────────────────────────────────────────────────────
+# ── llama3.1-8b ─────────────────────────────────────────────────────────────────
 python src/calc_steering_matrix_rfm_no_nullspace.py \
     --model_name    llama3.1 \
     --embedding_dir data/embeddings/llama3.1 \
