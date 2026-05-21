@@ -24,3 +24,6 @@ datasets==2.21.0
 huggingface-hub==0.34.1
 bitsandbytes==0.45.1
 gradio==5.23.3
+
+git+https://github.com/dmbeaglehole/xRFM.git@773fae8
+
