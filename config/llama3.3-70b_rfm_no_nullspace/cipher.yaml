@@ -1,4 +1,4 @@
-device: cuda
+device: auto
 model_name: llama3.3-70b
 steering_matrix_path: data/steering_matrix/steering_matrix_llama3.3-70b_rfm_no_nullspace.pt
 input_file: data/instructions/test/llama3.3-70b/cipher_llama3.3-70b.json
@@ -7,4 +7,4 @@ batch_size: 8
 max_new_tokens: 128
 file_rename: False
 prompt_column: query
-strength: -1.0,-0.9,-0.8,-0.7,-0.6,-0.5,-0.4,-0.3,-0.2,-0.1,0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0
+strength: -1.0,-0.8,-0.6,-0.4,-0.2,-0.1,0.0,0.1,0.2,0.3,0.4,0.5,0.6

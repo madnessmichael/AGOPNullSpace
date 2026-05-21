@@ -1,0 +1,10 @@
+device: auto
+model_name: llama3.1-70b
+steering_matrix_path: data/steering_matrix/steering_matrix_llama3.1-70b_rfm.pt
+input_file: data/instructions/test/llama3.1-70b/jailbroken_llama3.1-70b.json
+output_file: data/responses/llama3.1-70b/jailbroken_llama3.1-70b_rfm_results.json
+batch_size: 32
+max_new_tokens: 128
+file_rename: False
+prompt_column: query
+strength: -1.0,-0.8,-0.6,-0.4,-0.2,-0.1,0.0,0.1,0.2,0.3,0.4,0.5,0.6
