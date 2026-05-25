@@ -12,8 +12,8 @@ import os
 import glob
 
 # Set GPU
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
 from huggingface_hub import login
 
 # Đăng nhập Hugging Face

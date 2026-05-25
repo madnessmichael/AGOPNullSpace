@@ -35,3 +35,5 @@ data/pilot_results/
 wandb/
 runs/
 
+PNFinalResult/
+.env

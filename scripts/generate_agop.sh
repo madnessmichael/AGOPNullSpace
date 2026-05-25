@@ -52,3 +52,6 @@ python src/generate_response.py --config_path config/llama3.1-70b_rfm_no_nullspa
 python src/generate_response.py --config_path config/llama3.1-70b_rfm_no_nullspace/xstest.yaml
 python src/generate_response.py --config_path config/llama3.1-70b_rfm_no_nullspace/alpaca_eval.yaml
 python src/generate_response.py --config_path config/llama3.1-70b_rfm_no_nullspace/math.yaml
+
+
+python src/generate_response.py --config_path config/llama3.1_rfm_no_nullspace/math.yaml

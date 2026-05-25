@@ -559,20 +559,134 @@ python evaluation/jailbreak_local.py \
     --batch-size 1
 
 
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                gemma2  Llama-Guard-4-12B as a judge RFM-AGOP         ║
+#╚══════════════════════════════════════════════════════════════════════╝
 
-
-
-
-
-
-
-
-
-
+echo "=== Processing aim ==="
+python evaluation/jailbreak_local.py \
+    --input-file data/responses/gemma2/aim_gemma2_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
 
 echo "=== Processing autodan ==="
 python evaluation/jailbreak_local.py \
-    --input-file data/responses/llama3.1/autodan_llama3.1_results.json \
-    --llamaguard-model meta-llama/Llama-Guard-3-8B \
+    --input-file data/responses/gemma2/autodan_gemma2_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
     --hf-token ***REMOVED*** \
     --batch-size 1
+
+echo "=== Processing cipher ==="
+python evaluation/jailbreak_local.py \
+    --input-file data/responses/gemma2/cipher_gemma2_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing gcg ==="
+python evaluation/jailbreak_local.py \
+    --input-file data/responses/gemma2/gcg_gemma2_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing jailbroken ==="
+python evaluation/jailbreak_local.py \
+    --input-file data/responses/gemma2/jailbroken_gemma2_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing pair ==="
+python evaluation/jailbreak_local.py \
+    --input-file data/responses/gemma2/pair_gemma2_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing renellm ==="
+python evaluation/jailbreak_local.py \
+    --input-file data/responses/gemma2/renellm_gemma2_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+
+
+
+#╔══════════════════════════════════════════════════════════════════════╗
+#║              SUPERLOCAL  Llama-Guard-4-12B as a judge RFM-AGOP       ║
+#╚══════════════════════════════════════════════════════════════════════╝
+
+echo "=== Processing aim ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.3-70b/aim_llama3.3-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing cipher ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.3-70b/cipher_llama3.3-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing jailbroken ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.3-70b/jailbroken_llama3.3-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing pair ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.3-70b/pair_llama3.3-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing renellm ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.3-70b/renellm_llama3.3-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+
+echo "=== Processing aim ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.1-70b/aim_llama3.1-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing cipher ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.1-70b/cipher_llama3.1-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing jailbroken ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.1-70b/jailbroken_llama3.1-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing pair ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.1-70b/pair_llama3.1-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
+echo "=== Processing renellm ==="
+python evaluation/jailbreak_local.py \
+    --input-file ./lovingpp/packPP-backup/withNS/llama3.1-70b/renellm_llama3.1-70b_rfm_results.json \
+    --llamaguard-model meta-llama/Llama-Guard-4-12B \
+    --hf-token ***REMOVED*** \
+    --batch-size 1
+
