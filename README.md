@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="figures/fig1_method_overview.png" width="95%" alt="AGOPNullSpace pipeline overview"/>
+  <img src="figures/FigureAGOPNs.png" width="95%" alt="AGOPNullSpace pipeline overview"/>
 </p>
 
 > **EMNLP 2025 submission:** *Beyond Behavioral Refusal Directions: Null-Space Constrained Safety Steering with Recursive Feature Machines*
@@ -156,7 +156,7 @@ Evaluated on **Llama-3.1-8B-Instruct** with **Llama-Guard-4-12B** as judge. Numb
 ## Method
 
 <p align="center">
-  <img src="figures/fig1_method_overview.png" width="95%" alt="Method pipeline"/>
+  <img src="figures/FigureAGOPNs.png" width="95%" alt="Method pipeline"/>
 </p>
 
 The full pipeline proceeds as follows:
@@ -216,7 +216,7 @@ AGOPNullSpace/
 │   └── calc_steering_matrix_rfm_naive.py  # Baseline: r_rfm without null-space (rank-1 Δ*)
 │
 ├── figures/                             # Figures and tables for README
-│   ├── fig1_method_overview.png
+│   ├── FigureAGOPNs.png
 │   ├── fig2_dsr_sweep.png
 │   ├── fig3_cipher_highlight.png
 │   ├── fig4_radar.png
