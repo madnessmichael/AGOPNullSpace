@@ -15,7 +15,8 @@ import dotenv
 # ── environment ────────────────────────────────────────────────────────────────
 dotenv.load_dotenv()
 
-api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+# Prefer OPENROUTER_API_KEY so jailbreak always uses OpenRouter
+api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise ValueError("OPENAI_API_KEY or OPENROUTER_API_KEY is not set")
 

@@ -20,7 +20,7 @@ logging.basicConfig(
 dotenv.load_dotenv()
 
 import openai
-api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
 if not api_key:
     raise ValueError("OPENAI_API_KEY or OPENROUTER_API_KEY is not set")
 

@@ -1,0 +1,10 @@
+device: cuda:0
+model_name: qwen2.5
+steering_matrix_path: data/steering_matrix/steering_matrix_qwen2.5_rfm.pt
+input_file: data/instructions/test/qwen2.5/cipher_qwen2.5.json
+output_file: data/responses/qwen2.5/cipher_qwen2.5_rfm_no_nullspace_results.json
+batch_size: 8
+max_new_tokens: 128
+file_rename: False
+prompt_column: query
+strength: 0.95,1.1

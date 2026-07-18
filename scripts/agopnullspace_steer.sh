@@ -73,4 +73,10 @@ python src/calc_steering_matrix_rfm_no_nullspace.py \
 
 
 
-
+# ── llama3.1-70b ─────────────────────────────────────────────────────────────
+python src/calc_steering_matrix_rfm_no_nullspace.py \
+    --model_name    qwen2.5 \
+    --embedding_dir data/embeddings/qwen2.5 \
+    --device        cuda \
+    --save_path     data/steering_matrix/steering_matrix_qwen2.5_no_nullspace_rebuttal.pt \
+    --rfm_method    rfm \

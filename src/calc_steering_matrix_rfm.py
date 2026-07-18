@@ -37,8 +37,8 @@ import os
 import glob
 
 # Set GPU
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # Using GPU 1
 import argparse
 import sys
 import argparse
@@ -81,7 +81,7 @@ def parse_args():
     p.add_argument("--embedding_dir",  required=True)
     p.add_argument("--device",         default="cuda")
     p.add_argument("--save_path",      required=True)
-    p.add_argument("--rfm_method",     default="linear", choices=["linear", "rfm"])
+    p.add_argument("--rfm_method",     default="rfm")
     p.add_argument("--rfm_iters",      type=int, default=3)
     p.add_argument("--lambda_reg",     type=float, default=10.0)
     p.add_argument("--seed",           type=int, default=42)

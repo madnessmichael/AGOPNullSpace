@@ -41,44 +41,44 @@ echo ""
 echo "── Safety datasets (jailbreak.py) ──────────────────────"
 
 python "${SCRIPTS_DIR}/jailbreak.py" \
-    --input-file  "${DATA_DIR}/aim_llama3.1_rfm_results.json" \
-    --output-file "${DATA_DIR}/aim_llama3.1_rfm_results_eval.json" \
+    --input-file  "${DATA_DIR}/aim_llama3.1-70b_rfm_results.json" \
+    --output-file "${DATA_DIR}/aim_llama3.1-70b_rfm_results_eval.json" \
+    --strength    "${STRENGTH}" \
+    --model       gpt-4o-mini
+
+# python "${SCRIPTS_DIR}/jailbreak.py" \
+#     --input-file  "${DATA_DIR}/autodan_llama3.1-70b_rfm_results.json" \
+#     --output-file "${DATA_DIR}/autodan_llama3.1-70b_rfm_results_eval.json" \
+#     --strength    "${STRENGTH}" \
+#     --model       gpt-4o-mini
+
+python "${SCRIPTS_DIR}/jailbreak.py" \
+    --input-file  "${DATA_DIR}/cipher_llama3.1-70b_rfm_results.json" \
+    --output-file "${DATA_DIR}/cipher_llama3.1-70b_rfm_results_eval.json" \
+    --strength    "${STRENGTH}" \
+    --model       gpt-4o-mini
+
+# python "${SCRIPTS_DIR}/jailbreak.py" \
+#     --input-file  "${DATA_DIR}/gcg_llama3.1-70b_rfm_results.json" \
+#     --output-file "${DATA_DIR}/gcg_llama3.1-70b_rfm_results_eval.json" \
+#     --strength    "${STRENGTH}" \
+#     --model       gpt-4o-mini
+
+python "${SCRIPTS_DIR}/jailbreak.py" \
+    --input-file  "${DATA_DIR}/jailbroken_llama3.1-70b_rfm_results.json" \
+    --output-file "${DATA_DIR}/jailbroken_llama3.1-70b_rfm_results_eval.json" \
     --strength    "${STRENGTH}" \
     --model       gpt-4o-mini
 
 python "${SCRIPTS_DIR}/jailbreak.py" \
-    --input-file  "${DATA_DIR}/autodan_llama3.1_rfm_results.json" \
-    --output-file "${DATA_DIR}/autodan_llama3.1_rfm_results_eval.json" \
+    --input-file  "${DATA_DIR}/pair_llama3.1-70b_rfm_results.json" \
+    --output-file "${DATA_DIR}/pair_llama3.1-70b_rfm_results_eval.json" \
     --strength    "${STRENGTH}" \
     --model       gpt-4o-mini
 
 python "${SCRIPTS_DIR}/jailbreak.py" \
-    --input-file  "${DATA_DIR}/cipher_llama3.1_rfm_results.json" \
-    --output-file "${DATA_DIR}/cipher_llama3.1_rfm_results_eval.json" \
-    --strength    "${STRENGTH}" \
-    --model       gpt-4o-mini
-
-python "${SCRIPTS_DIR}/jailbreak.py" \
-    --input-file  "${DATA_DIR}/gcg_llama3.1_rfm_results.json" \
-    --output-file "${DATA_DIR}/gcg_llama3.1_rfm_results_eval.json" \
-    --strength    "${STRENGTH}" \
-    --model       gpt-4o-mini
-
-python "${SCRIPTS_DIR}/jailbreak.py" \
-    --input-file  "${DATA_DIR}/jailbroken_llama3.1_rfm_results.json" \
-    --output-file "${DATA_DIR}/jailbroken_llama3.1_rfm_results_eval.json" \
-    --strength    "${STRENGTH}" \
-    --model       gpt-4o-mini
-
-python "${SCRIPTS_DIR}/jailbreak.py" \
-    --input-file  "${DATA_DIR}/pair_llama3.1_rfm_results.json" \
-    --output-file "${DATA_DIR}/pair_llama3.1_rfm_results_eval.json" \
-    --strength    "${STRENGTH}" \
-    --model       gpt-4o-mini
-
-python "${SCRIPTS_DIR}/jailbreak.py" \
-    --input-file  "${DATA_DIR}/renellm_llama3.1_rfm_results.json" \
-    --output-file "${DATA_DIR}/renellm_llama3.1_rfm_results_eval.json" \
+    --input-file  "${DATA_DIR}/renellm_llama3.1-70b_rfm_results.json" \
+    --output-file "${DATA_DIR}/renellm_llama3.1-70b_rfm_results_eval.json" \
     --strength    "${STRENGTH}" \
     --model       gpt-4o-mini
 
@@ -87,9 +87,9 @@ echo ""
 echo "── XSTest (xstest.py) ──────────────────────────────────"
 
 python "${SCRIPTS_DIR}/xstest.py" \
-    --input_file      "${DATA_DIR}/xstest_llama3.1_rfm_results.json" \
+    --input_file      "${DATA_DIR}/xstest_llama3.1-70b_rfm_results.json" \
     --question_column prompt \
-    --model_name      "llama3.1_rfm" \
+    --model_name      "llama3.1-70b_rfm" \
     --strength        "${STRENGTH}"
 
 # ── 3. AlpacaEval ─────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ ALPACA_PREP="${TMP_DIR}/alpaca_eval_s${STRENGTH}.json"
 python - <<PYEOF
 import json
 
-with open("${DATA_DIR}/alpaca_eval_llama3.1_rfm_results.json") as f:
+with open("${DATA_DIR}/alpaca_eval_llama3.1-70b_rfm_results.json") as f:
     data = json.load(f)
 
 out = []
@@ -109,7 +109,7 @@ for item in data:
     out.append({
         "instruction": item["instruction"],
         "output":      item["response_strength:${STRENGTH}"],
-        "generator":   item.get("generator", "llama3.1_rfm"),
+        "generator":   item.get("generator", "llama3.1-70b_rfm"),
         "dataset":     item.get("dataset", ""),
     })
 
@@ -123,7 +123,7 @@ python "${EVAL_DIR}/alpaca.py" \
     --model-outputs     "${ALPACA_PREP}" \
     --reference-outputs "${ALPACA_REF}" \
     --annotators-config "${ALPACA_CFG}" \
-    --name              "llama3.1_rfm_s${STRENGTH}" \
+    --name              "llama3.1-70b_rfm_s${STRENGTH}" \
     --output-path       "${ALPACA_OUT}"
 
 # ── 4. GSM8K & MATH500 (exact match) ──────────────────────────────────────────
@@ -151,8 +151,8 @@ def normalize(s: str) -> str:
 response_key = f"response_strength:{STRENGTH}"
 
 for name, fname, answer_col in [
-    ("gsm8k",  "gsm8k_llama3.1_rfm_results.json", "answer"),
-    ("math500", "math_llama3.1_rfm_results.json",  "answer"),
+    ("gsm8k",  "gsm8k_llama3.1-70b_rfm_results.json", "answer"),
+    ("math500", "math_llama3.1-70b_rfm_results.json",  "answer"),
 ]:
     fpath = os.path.join(DATA_DIR, fname)
     if not os.path.exists(fpath):
@@ -177,7 +177,7 @@ echo "── Results Summary (paper format) ────────────
 python "${SCRIPTS_DIR}/summarize_results.py" \
     --data-dir   "${DATA_DIR}" \
     --strength   "${STRENGTH}" \
-    --model-tag  "llama3.1_rfm" \
+    --model-tag  "llama3.1-70b_rfm" \
     --alpaca-out "${ALPACA_OUT}" \
     --save       "${SUMMARY_FILE}"
 

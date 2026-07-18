@@ -27,7 +27,7 @@ import glob
 
 # Set GPU
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Using GPU 1
+os.environ["CUDA_VISIBLE_DEVICES"] = "5"  # Using GPU 1
 import argparse
 import pickle
 import argparse
@@ -35,6 +35,9 @@ import logging
 import numpy as np
 import torch
 from copy import deepcopy
+from xrfm import RFM
+from sklearn.metrics import roc_auc_score
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -99,52 +102,52 @@ def train_logistic_gpu(X: torch.Tensor, y: torch.Tensor,
 # PHẦN 1 — AGOP functions
 # ══════════════════════════════════════════════════════════════════════════════
 
-def compute_agop_linear(H_pos: torch.Tensor,
-                        H_neg: torch.Tensor,
-                        device: str = "cpu") -> tuple:
-    """
-    Refusal direction = top eigenvector của AGOP(w·wᵀ) từ logistic probe.
-    Toàn bộ chạy trên `device` (GPU nếu chỉ định).
-
-    Returns:
-        agop : [d,d] trên CPU  (để tránh OOM khi lưu nhiều layers)
-        r    : [d]   trên CPU
-    """
-    dev = torch.device(device)
-    N_pos, d = H_pos.shape
-
-    X = torch.cat([H_pos, H_neg], dim=0).float().to(dev)
-    y = torch.cat([
-        torch.ones(N_pos, device=dev),
-        torch.zeros(H_neg.shape[0], device=dev)
-    ])
-
-    X_sc, mean_, std_ = standardize_gpu(X)
-
-    logger.info("  GPU logistic: %d pos + %d neg, d=%d, device=%s",
-                N_pos, H_neg.shape[0], d, dev)
-
-    # Nhỏ hyperparameter search
-    best_acc, best_C, best_w_sc = -1.0, 1.0, None
-    for C in [0.1, 1.0, 10.0]:
-        w_sc = train_logistic_gpu(X_sc, y, C=C)
-        acc  = ((X_sc @ w_sc > 0).float() == y).float().mean().item()
-        if acc > best_acc:
-            best_acc, best_C, best_w_sc = acc, C, w_sc.clone()
-
-    logger.info("  Best C=%.1f  train_acc=%.4f", best_C, best_acc)
-
-    # Unscale
-    w_orig = (best_w_sc / std_).cpu()
-    r = w_orig / w_orig.norm().clamp(min=1e-8)
-    agop = torch.outer(w_orig, w_orig)  # rank-1, CPU
-
-    # Clear GPU cache
-    del X, y, X_sc, mean_, std_, best_w_sc
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    return agop, r
+# def compute_agop_linear(H_pos: torch.Tensor,
+#                         H_neg: torch.Tensor,
+#                         device: str = "cpu") -> tuple:
+#     """
+#     Refusal direction = top eigenvector của AGOP(w·wᵀ) từ logistic probe.
+#     Toàn bộ chạy trên `device` (GPU nếu chỉ định).
+#
+#     Returns:
+#         agop : [d,d] trên CPU  (để tránh OOM khi lưu nhiều layers)
+#         r    : [d]   trên CPU
+#     """
+#     dev = torch.device(device)
+#     N_pos, d = H_pos.shape
+#
+#     X = torch.cat([H_pos, H_neg], dim=0).float().to(dev)
+#     y = torch.cat([
+#         torch.ones(N_pos, device=dev),
+#         torch.zeros(H_neg.shape[0], device=dev)
+#     ])
+#
+#     X_sc, mean_, std_ = standardize_gpu(X)
+#
+#     logger.info("  GPU logistic: %d pos + %d neg, d=%d, device=%s",
+#                 N_pos, H_neg.shape[0], d, dev)
+#
+#     # Nhỏ hyperparameter search
+#     best_acc, best_C, best_w_sc = -1.0, 1.0, None
+#     for C in [0.1, 1.0, 10.0]:
+#         w_sc = train_logistic_gpu(X_sc, y, C=C)
+#         acc  = ((X_sc @ w_sc > 0).float() == y).float().mean().item()
+#         if acc > best_acc:
+#             best_acc, best_C, best_w_sc = acc, C, w_sc.clone()
+#
+#     logger.info("  Best C=%.1f  train_acc=%.4f", best_C, best_acc)
+#
+#     # Unscale
+#     w_orig = (best_w_sc / std_).cpu()
+#     r = w_orig / w_orig.norm().clamp(min=1e-8)
+#     agop = torch.outer(w_orig, w_orig)  # rank-1, CPU
+#
+#     # Clear GPU cache
+#     del X, y, X_sc, mean_, std_, best_w_sc
+#     if torch.cuda.is_available():
+#         torch.cuda.empty_cache()
+#
+#     return agop, r
 
 
 def compute_agop_rfm(H_pos: torch.Tensor,
@@ -159,12 +162,7 @@ def compute_agop_rfm(H_pos: torch.Tensor,
         agop : [d,d] CPU
         r    : [d]   CPU
     """
-    try:
-        from xrfm import RFM
-        from sklearn.metrics import roc_auc_score
-    except ImportError:
-        logger.warning("xrfm not installed. Falling back to linear AGOP.")
-        return compute_agop_linear(H_pos, H_neg, device)
+
 
     dev = torch.device(device)
     N_pos, d = H_pos.shape
@@ -194,7 +192,8 @@ def compute_agop_rfm(H_pos: torch.Tensor,
                 m = RFM(kernel='l2_high_dim', bandwidth=bw, device=device)
                 m.fit((Xtr, ytr), (Xvl, yvl),
                       reg=reg, iters=rfm_iters,
-                      center_grads=True, early_stop_rfm=True,
+                      center_grads=False, early_stop_rfm=True,
+                      # center_grads=True, early_stop_rfm=True,
                       get_agop_best_model=True, top_k=1)
                 preds = m.predict(Xvl).cpu().numpy()
                 auc = roc_auc_score(yvl.cpu().numpy(), preds)
@@ -204,9 +203,9 @@ def compute_agop_rfm(H_pos: torch.Tensor,
             except Exception as e:
                 logger.warning("  RFM bw=%.1f reg=%.0e failed: %s", bw, reg, e)
 
-    if best_model is None:
-        logger.warning("  All RFM fits failed. Falling back to linear.")
-        return compute_agop_linear(H_pos, H_neg, device)
+    # if best_model is None:
+    #     logger.warning("  All RFM fits failed. Falling back to linear.")
+    #     return compute_agop_linear(H_pos, H_neg, device)
 
     logger.info("  Best RFM AUC=%.4f", best_auc)
     agop = best_model.agop_best_model.cpu()
@@ -259,12 +258,7 @@ def compute_rfm_refusal_vectors(
         if len(h_neg) > n_min:
             h_neg = h_neg[torch.randperm(len(h_neg))[:n_min]]
 
-        if method == "linear":
-            _, r = compute_agop_linear(h_pos, h_neg, device=device)  # FIX B3
-        elif method == "rfm":
-            _, r = compute_agop_rfm(h_pos, h_neg, rfm_iters=rfm_iters, device=device)
-        else:
-            raise ValueError(f"Unknown method: {method}")
+        _, r = compute_agop_rfm(h_pos, h_neg, rfm_iters=rfm_iters, device=device)
 
         refusal_vectors[layer_idx] = r.float().numpy()
         logger.info("  r[%d] norm=%.6f", layer_idx, np.linalg.norm(refusal_vectors[layer_idx]))

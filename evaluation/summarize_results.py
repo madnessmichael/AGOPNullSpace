@@ -7,9 +7,9 @@ two-table format as the AlphaSteer paper (Table 1 & Table 2).
 
 Usage:
     python summarize_results.py \
-        --data-dir  /path/to/llama3.1-8b \
+        --data-dir  /path/to/llama3.1-70b-8b \
         --strength  0.75 \
-        --model-tag "llama3.1_rfm" \
+        --model-tag "llama3.1-70b_rfm" \
         [--alpaca-out /path/to/alpaca_eval_results] \
         [--save /path/to/results_summary.txt]
 """
@@ -153,7 +153,7 @@ def main():
     parser = argparse.ArgumentParser(description="Summarise AlphaSteer eval results")
     parser.add_argument("--data-dir",   required=True,  help="Dir with *_rfm_results*.json files")
     parser.add_argument("--strength",   required=True,  help='Strength value, e.g. "0.75"')
-    parser.add_argument("--model-tag",  default="llama3.1_rfm", help="Label for the row")
+    parser.add_argument("--model-tag",  default="llama3.1-70b_rfm", help="Label for the row")
     parser.add_argument("--alpaca-out", default=None,   help="Dir written by alpaca.py (alpaca_eval_results/)")
     parser.add_argument("--save",       default=None,   help="Optional: also write summary to this file")
     args = parser.parse_args()
@@ -180,7 +180,9 @@ def main():
     emit(divider())
 
     for ds in safety_datasets:
-        eval_path = os.path.join(D, f"{ds}_llama3.1_rfm_results_eval.json")
+        # eval_path = os.path.join(D, f"{ds}_llama3.1-70b_rfm_results_eval.json")
+        eval_path = os.path.join(D, f"{ds}_llama3.1-70b_rfm_no_nullspace_results_eval.json")
+        
         if not os.path.exists(eval_path):
             dsr_values.append(None)
             continue
@@ -204,7 +206,9 @@ def main():
     emit(divider())
 
     # XSTest — compliance rate
-    xstest_path = os.path.join(D, "xstest_llama3.1_rfm_results_eval_evaluated.json")
+    # xstest_path = os.path.join(D, "xstest_llama3.1-70b_rfm_results_eval_evaluated.json")
+    xstest_path = os.path.join(D, "xstest_llama3.1-70b_rfm_no_nullspace_results_eval_evaluated.json")
+    
     if os.path.exists(xstest_path):
         val = compliance_from_xstest(xstest_path, S)
         emit(f"  {'XSTest (full compliance %)':<35}  {fmt(val):>10}  1_full_compliance / total")
@@ -213,7 +217,9 @@ def main():
 
     # AlpacaEval — win rate
     alpaca_dir = args.alpaca_out or os.path.join(D, "alpaca_eval_results")
-    alpaca_tag = f"llama3.1_rfm_s{S}"
+    # alpaca_tag = f"llama3.1-70b_rfm_s{S}"
+    alpaca_tag = f"llama3.1-70b_rfm_no_nullspace_s{S}"
+
     raw_wr, lc_wr = winrate_from_alpaca(alpaca_dir, alpaca_tag)
     if raw_wr is not None:
         emit(f"  {'AlpacaEval raw win rate (%)':<35}  {fmt(raw_wr):>10}  vs text-davinci-003")
@@ -222,7 +228,8 @@ def main():
         emit(f"  {'AlpacaEval (win rate %)':<35}  {'N/A':>10}  (leaderboard CSV not found in {alpaca_dir})")
 
     # GSM8K
-    gsm_path = os.path.join(D, "gsm8k_llama3.1_rfm_results.json")
+    # gsm_path = os.path.join(D, "gsm8k_llama3.1-70b_rfm_results.json")
+    gsm_path = os.path.join(D, "gsm8k_llama3.1-70b_rfm_no_nullspace_results.json")
     if os.path.exists(gsm_path):
         val = accuracy_from_gsm8k(gsm_path, S)
         emit(f"  {'GSM8K (accuracy %)':<35}  {fmt(val):>10}  #### format + last number")
@@ -230,7 +237,9 @@ def main():
         emit(f"  {'GSM8K (accuracy %)':<35}  {'N/A':>10}  (file not found)")
 
     # MATH500
-    math_path = os.path.join(D, "math_llama3.1_rfm_results.json")
+    # math_path = os.path.join(D, "math_llama3.1-70b_rfm_results.json")
+    math_path = os.path.join(D, "math_llama3.1-70b_rfm_no_nullspace_results.json")
+
     if os.path.exists(math_path):
         val = accuracy_from_math500(math_path, S)
         emit(f"  {'MATH500 (accuracy %)':<35}  {fmt(val):>10}  \\boxed{{}} + norm_math")

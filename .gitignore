@@ -29,6 +29,7 @@ data/embeddings/
 data/responses/
 data/steering_matrix/
 data/pilot_results/
+rentGPUs_runs/
 
 # Cache
 .cache/
@@ -37,3 +38,4 @@ runs/
 
 PNFinalResult/
 .env
+

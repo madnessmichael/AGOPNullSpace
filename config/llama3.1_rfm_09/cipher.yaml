@@ -1,0 +1,10 @@
+device: cuda:4
+model_name: llama3.1
+steering_matrix_path: data/steering_matrix/steering_matrix_llama3.1_rfm_09.pt
+input_file: data/instructions/test/llama3.1/cipher_llama3.1.json
+output_file: data/responses/llama3.1/cipher_llama3.1_rfm_09_results.json
+batch_size: 8
+max_new_tokens: 128
+file_rename: False
+prompt_column: query
+strength: 0.75,
