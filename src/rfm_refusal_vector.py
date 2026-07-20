@@ -1,305 +1,556 @@
 """
-rfm_refusal_vector.py  (v2 — fixed)
-=====================================
-Thay thế DIM bằng RFM để tạo refusal vector trong AlphaSteer pipeline.
+rfm_refusal_vector.py  (v3 — aligned with xRFM + neural_controllers)
+====================================================================
+Trích xuất AGOP concept vector cho AlphaSteer/AGOPNs pipeline.
 
-BUG ĐÃ FIX so với v1:
-  B1. compute_agop_linear dùng sklearn/numpy → luôn CPU dù pass device="cuda".
-      → Fixed: GPU-native logistic via torch LBFGS + standardize_gpu.
-  B2. compute_agop_rfm: val split random có thể all-pos hoặc all-neg.
-      → Fixed: stratified split theo label.
-  B3. compute_rfm_refusal_vectors: device bị ignore trong nhánh "linear".
-      → Fixed: giờ compute_agop_linear nhận device và chạy đúng trên GPU.
-  B4. load_alphasteer_embeddings: thiếu .float() → dtype mismatch với bfloat16.
-      → Fixed: luôn cast sang float32 sau khi load.
-  B5. main block: thiếu seed → không reproducible.
-      → Fixed: thêm --seed arg và set torch + numpy seed.
+Bản này được viết lại để KHỚP CHÍNH XÁC với reference implementation:
+  - xRFM                : xrfm/rfm_src/recursive_feature_machine.py
+  - neural_controllers  : direction_utils.py::train_rfm_probe_on_concept
+                          control_toolkits.py::RFMToolkit._compute_directions
+                          control_toolkits.py::RFMToolkit._compute_signs
 
-THIẾU SÓT CÒN LẠI (data):
-  - H_refusal = H_malicious là approximation cho Dr.
-    Dr thực sự = prompts mà model actually refused sau khi pass qua model.
-    AlphaSteer gốc extract Dr/Dc riêng từ 720 malicious prompts.
-  - H_math không được include trong H_benign (đúng với gốc dòng 3905-3913).
+THAY ĐỔI SO VỚI v2 (và lý do):
+  R1. RFM(...) THIẾU `tuning_metric`  → mặc định 'mse'.
+      Hậu quả: best_iter / early_stop / best_M / agop_best_model đều được
+      chọn theo MSE, trong khi vòng ngoài lại chọn theo AUC → AGOP lấy ra
+      KHÔNG phải AGOP của model AUC-best.
+      → Fix: truyền tuning_metric='auc' vào constructor như reference.
+
+  R2. `center_grads=True` bị hard-code.
+      Reference search {True, False}. Ngoài ra AGOP theo định nghĩa
+      (Deep Neural Feature Ansatz) là UNCENTERED gradient covariance;
+      với binary probe, gradient trung bình CHÍNH LÀ hướng phân biệt, nên
+      centering xoá đúng thành phần ta cần.
+      → Fix: đưa center_grads vào search space (mặc định [True, False]).
+
+  R3. Split "stratified" nhưng KHÔNG shuffle: `pos_idx[:nv_pos]` lấy 400 mẫu
+      ĐẦU của H_refusal = toàn bộ AdvBench, không có jailbreak nào.
+      → Fix: dùng sklearn train_test_split(stratify=y, shuffle=True).
+
+  R4. `randperm` gọi lại mỗi layer → mỗi layer dùng benign subset khác nhau.
+      → Fix: 1 permutation cố định (torch.Generator có seed), tái dùng cho
+        mọi layer.
+
+  R5. `torch.lobpcg` gọi trần, không regularization/fallback; nếu fail hoặc
+      nếu tất cả RFM fit fail (`best_model is None`) → AttributeError khó hiểu
+      (fallback đã bị comment mất).
+      → Fix: top_eigenvectors() theo pattern xrfm/rfm_src/utils.py::
+        get_top_eigenvector (eps*I + fallback eigh); raise RuntimeError rõ ràng.
+
+  R6. Tham số `method` bị bỏ qua hoàn toàn (luôn chạy RFM dù truyền "linear").
+      → Fix: bỏ hẳn tham số chết; `--probe {rfm,linear}` thực sự có tác dụng.
+
+  R7. Sign calibrate trên toàn bộ X (train+val).
+      → Fix: calibrate trên TRAIN split, dùng pearson_corr +
+        project_onto_direction đúng như RFMToolkit._compute_signs.
+
+  R8. `deepcopy(model)` mỗi khi có model tốt hơn → tốn VRAM vô ích.
+      → Fix: chỉ clone `agop_best_model` (thứ duy nhất được dùng về sau).
+
+GHI CHÚ VỀ NGỮ NGHĨA (quan trọng cho manuscript):
+  y = 1 gán cho D_m (malicious/jailbreak), y = 0 cho D_b (benign).
+  Sign được calibrate sao cho corr(Z @ r, y) > 0, tức r trỏ về phía lớp
+  MALICIOUS. Đây là "harmfulness direction", KHÔNG phải "refusal direction"
+  theo nghĩa của AlphaSteer (vốn lấy D_r = prompt model thực sự đã từ chối).
+  Hàm trả về r với quy ước này; nếu cần hướng refusal thật, xem
+  `--dr_from_responses` (chưa implement — cần chạy model để lọc refusal).
 """
 
-import os
-import glob
+from __future__ import annotations
 
-# Set GPU
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"  # Using GPU 1
-import argparse
-import pickle
 import argparse
 import logging
+import os
+import pickle
+from typing import Dict, List, Optional, Sequence, Tuple
+
 import numpy as np
 import torch
-from copy import deepcopy
-from xrfm import RFM
 from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
 
+from xrfm import RFM
+
+try:
+    from utils.steering_utils import disable_tf32
+except Exception:   # chạy standalone ngoài repo
+    def disable_tf32(verbose=True):
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+            torch.set_float32_matmul_precision("highest")
+        except Exception:
+            pass
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-STEERING_LAYERS = {
-    "llama3.1": [8, 9, 10, 11, 12, 13, 14, 16, 18, 19],
-    "qwen2.5":  [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19],
-    "gemma2":   [6, 8, 10, 11, 12, 13, 14, 15, 16, 18, 22],
-    "llama3.3-70b": [28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50],
-    "llama3.1-8b-unsloth": [8, 9, 10, 11, 12, 13, 14, 16, 18, 19],
-    "qwen3-32b": [16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38],
-    "gpt-oss-120b": [40, 45, 50, 55, 60, 65, 70, 75, 80, 85],
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Helpers — sao chép ngữ nghĩa từ neural_controllers/direction_utils.py
+# ══════════════════════════════════════════════════════════════════════════════
+
+def pearson_corr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """direction_utils.py::pearson_corr (nguyên văn)."""
+    assert x.shape == y.shape
+    x = x.float() + 0.0
+    y = y.float() + 0.0
+    xc = x - x.mean()
+    yc = y - y.mean()
+    num = torch.sum(xc * yc)
+    den = torch.sqrt(torch.sum(xc ** 2) * torch.sum(yc ** 2))
+    return num / den.clamp(min=1e-12)
+
+
+def project_onto_direction(tensors: torch.Tensor, direction: torch.Tensor) -> torch.Tensor:
+    """direction_utils.py::project_onto_direction — chỉ là `tensors @ direction`."""
+    assert tensors.dim() == 2
+    assert tensors.shape[1] == direction.shape[0]
+    return tensors @ direction.to(device=tensors.device, dtype=tensors.dtype)
+
+
+def compute_prediction_metrics(preds, labels) -> Dict[str, float]:
+    """Rút gọn direction_utils.py::compute_prediction_metrics cho binary."""
+    if isinstance(preds, torch.Tensor):
+        preds = preds.detach().cpu().numpy()
+    if isinstance(labels, torch.Tensor):
+        labels = labels.detach().cpu().numpy()
+    labels = labels.reshape(-1, 1) if labels.ndim == 1 else labels
+    preds = preds.reshape(labels.shape)
+    auc = roc_auc_score(labels, preds)
+    mse = float(np.mean((preds - labels) ** 2))
+    acc = float(np.mean((preds >= 0.5) == (labels >= 0.5)) * 100)
+    return {"auc": float(auc), "mse": mse, "acc": acc}
+
+
+def top_eigenvectors(M: torch.Tensor, k: int = 1, eps: float = 1e-6
+                     ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Top-k eigenpairs của ma trận đối xứng PSD.
+
+    Theo pattern của xrfm/rfm_src/utils.py::get_top_eigenvector:
+    lobpcg (nhanh, O(d^2 k)) với regularization eps*I, fallback eigh nếu fail.
+    Code cũ gọi `torch.lobpcg(agop, k=1)` trần — chính là pattern mà xRFM
+    cố tình bọc lại vì lobpcg hay fail trên ma trận ill-conditioned.
+
+    Returns
+    -------
+    S : (k,)   eigenvalues giảm dần
+    U : (d, k) eigenvectors (cột), đã chuẩn hoá
+    """
+    d = M.shape[0]
+    M = 0.5 * (M + M.T)  # ép đối xứng: AGOP về lý thuyết đối xứng, thực tế lệch ~1e-7
+
+    try:
+        M_reg = M + eps * torch.eye(d, device=M.device, dtype=M.dtype)
+        S, U = torch.lobpcg(M_reg, k=k, largest=True)
+        if torch.isfinite(S).all() and torch.isfinite(U).all():
+            return S, U
+        logger.warning("  lobpcg trả về NaN/Inf → fallback eigh")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("  lobpcg failed (%s) → fallback eigh", e)
+
+    evals, evecs = torch.linalg.eigh(M)          # tăng dần
+    S = evals.flip(0)[:k]
+    U = evecs.flip(1)[:, :k]
+    return S, U
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PHẦN 1 — RFM probe  (mirror: direction_utils.py::train_rfm_probe_on_concept)
+# ══════════════════════════════════════════════════════════════════════════════
+
+DEFAULT_SEARCH_SPACE = {
+    "regs": [1e-3, 1e-2],
+    "bws": [1.0, 10.0, 100.0],
+    "center_grads": [True, False],   # R2: reference search cả hai
 }
 
 
-# ── GPU-native standardization ────────────────────────────────────────────────
-
-def standardize_gpu(X: torch.Tensor):
-    """Z-score trên GPU. Returns (X_scaled, mean_, std_)."""
-    mean_ = X.mean(dim=0)
-    std_  = X.std(dim=0).clamp(min=1e-8)
-    return (X - mean_) / std_, mean_, std_
-
-
-# ── GPU-native logistic regression via L-BFGS ────────────────────────────────
-
-def _logistic_loss(w, X, y, C=1.0):
-    logits = X @ w
-    loss = torch.nn.functional.binary_cross_entropy_with_logits(
-        logits, y, reduction='mean'
-    )
-    return loss + (0.5 / C) * (w @ w)
-
-
-def train_logistic_gpu(X: torch.Tensor, y: torch.Tensor,
-                       C: float = 1.0, max_iter: int = 500) -> torch.Tensor:
+def train_rfm_probe_on_concept(
+    train_X: torch.Tensor,
+    train_y: torch.Tensor,
+    val_X: torch.Tensor,
+    val_y: torch.Tensor,
+    rfm_iters: int = 5,
+    n_components: int = 1,
+    tuning_metric: str = "auc",
+    search_space: Optional[dict] = None,
+    device: str = "cuda",
+) -> Tuple[torch.Tensor, dict]:
     """
-    Binary logistic regression trên GPU bằng L-BFGS.
-    X: [N,d] float32 on device, y: [N] float32 on device.
-    Returns w: [d] on device.
+    Grid-search RFM probe, trả về AGOP của model tốt nhất.
+
+    Khác v2 ở 3 điểm, tất cả đều để khớp reference:
+      1. `tuning_metric` được truyền vào RFM(...) → internal early-stop /
+         best_iter / agop_best_model đều nhất quán với metric vòng ngoài.
+      2. `center_grads` nằm trong search space.
+      3. Chỉ clone AGOP thay vì deepcopy cả model.
+
+    Returns
+    -------
+    best_agop : (d, d) trên `device`
+    info      : dict metadata (best_score/bw/reg/center_grads/n_fits_ok)
     """
-    w = torch.zeros(X.shape[1], dtype=torch.float32, device=X.device,
-                    requires_grad=True)
-    opt = torch.optim.LBFGS(
-        [w], lr=1.0, max_iter=max_iter,
-        tolerance_grad=1e-6, tolerance_change=1e-6,
-        history_size=10, line_search_fn='strong_wolfe'
+    if search_space is None:
+        search_space = DEFAULT_SEARCH_SPACE
+
+    maximize = tuning_metric in ("f1", "auc", "acc", "top_agop_vectors_ols_auc")
+    best_score = float("-inf") if maximize else float("inf")
+    best_agop = None
+    best_cfg: Dict[str, object] = {}
+    n_ok = 0
+    n_fail = 0
+
+    for reg in search_space["regs"]:
+        for bw in search_space["bws"]:
+            for center_grads in search_space["center_grads"]:
+                try:
+                    model = RFM(
+                        kernel="l2_high_dim",
+                        bandwidth=bw,
+                        tuning_metric=tuning_metric,   # ← R1
+                        device=device,
+                        verbose=False,
+                    )
+                    model.fit(
+                        (train_X, train_y),
+                        (val_X, val_y),
+                        reg=reg,
+                        iters=rfm_iters,
+                        center_grads=center_grads,     # ← R2
+                        early_stop_rfm=True,
+                        get_agop_best_model=True,
+                        top_k=n_components,
+                    )
+
+                    preds = model.predict(val_X)
+                    val_score = compute_prediction_metrics(preds, val_y)[tuning_metric]
+                    n_ok += 1
+
+                    improved = (val_score > best_score) if maximize else (val_score < best_score)
+                    if improved:
+                        best_score = val_score
+                        # R8: chỉ giữ AGOP, không deepcopy cả RFM (centers + M + weights)
+                        best_agop = model.agop_best_model.detach().clone()
+                        best_cfg = {
+                            "reg": reg,
+                            "bandwidth": bw,
+                            "center_grads": center_grads,
+                            "best_iter": int(model.best_iter),
+                        }
+
+                    del model
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                except Exception as e:  # noqa: BLE001
+                    n_fail += 1
+                    logger.warning(
+                        "  RFM fit failed (bw=%.1f reg=%.0e center_grads=%s): %s",
+                        bw, reg, center_grads, e,
+                    )
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+    # R5: fail rõ ràng thay vì AttributeError trên None
+    if best_agop is None:
+        raise RuntimeError(
+            f"Tất cả {n_fail} cấu hình RFM đều fail — không có AGOP nào để trích xuất. "
+            f"Kiểm tra VRAM, dtype (phải float32), và shape của y (phải [N,1])."
+        )
+
+    logger.info(
+        "  RFM best %s=%.4f | bw=%.1f reg=%.0e center_grads=%s best_iter=%d (%d/%d fits ok)",
+        tuning_metric, best_score, best_cfg["bandwidth"], best_cfg["reg"],
+        best_cfg["center_grads"], best_cfg["best_iter"], n_ok, n_ok + n_fail,
     )
-    def closure():
-        opt.zero_grad()
-        loss = _logistic_loss(w, X, y, C=C)
-        loss.backward()
-        return loss
-    opt.step(closure)
-    return w.detach()
+    best_cfg["score"] = best_score
+    best_cfg["tuning_metric"] = tuning_metric
+    return best_agop, best_cfg
+
+
+def train_linear_probe_on_concept(
+    train_X: torch.Tensor,
+    train_y: torch.Tensor,
+    val_X: torch.Tensor,
+    val_y: torch.Tensor,
+    device: str = "cuda",
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Ridge probe làm baseline (mirror direction_utils.py::train_linear_probe_on_concept:
+    cùng reg_search_space, cùng linear_solve, cùng tuning bằng AUC).
+
+    AGOP của một predictor tuyến tính f(z) = z@beta là beta·beta^T (rank-1),
+    nên top eigenvector = beta/||beta||. Trả về AGOP để dùng chung downstream.
+    """
+    reg_space = [1e-4, 1e-3, 1e-2, 1e-1, 1.0, 1e1]
+    X = train_X.to(device).float()
+    y = train_y.to(device).float()
+    Xv = val_X.to(device).float()
+
+    n, d = X.shape
+    best_beta, best_score, best_reg = None, float("-inf"), None
+    XtX = X.T @ X
+    Xty = X.T @ y
+    eye = torch.eye(d, device=device, dtype=X.dtype)
+    for reg in reg_space:
+        beta = torch.linalg.solve(XtX + reg * n * eye, Xty)   # (d, 1)
+        score = compute_prediction_metrics(Xv @ beta, val_y)["auc"]
+        if score > best_score:
+            best_score, best_beta, best_reg = score, beta, reg
+
+    beta = best_beta.squeeze(-1)
+    logger.info("  Linear probe best auc=%.4f (reg=%.0e)", best_score, best_reg)
+    agop = torch.outer(beta, beta)
+    return agop, {"score": best_score, "reg": best_reg, "probe": "linear"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PHẦN 1 — AGOP functions
+# PHẦN 2 — Concept vector cho 1 layer
 # ══════════════════════════════════════════════════════════════════════════════
 
-# def compute_agop_linear(H_pos: torch.Tensor,
-#                         H_neg: torch.Tensor,
-#                         device: str = "cpu") -> tuple:
-#     """
-#     Refusal direction = top eigenvector của AGOP(w·wᵀ) từ logistic probe.
-#     Toàn bộ chạy trên `device` (GPU nếu chỉ định).
-#
-#     Returns:
-#         agop : [d,d] trên CPU  (để tránh OOM khi lưu nhiều layers)
-#         r    : [d]   trên CPU
-#     """
-#     dev = torch.device(device)
-#     N_pos, d = H_pos.shape
-#
-#     X = torch.cat([H_pos, H_neg], dim=0).float().to(dev)
-#     y = torch.cat([
-#         torch.ones(N_pos, device=dev),
-#         torch.zeros(H_neg.shape[0], device=dev)
-#     ])
-#
-#     X_sc, mean_, std_ = standardize_gpu(X)
-#
-#     logger.info("  GPU logistic: %d pos + %d neg, d=%d, device=%s",
-#                 N_pos, H_neg.shape[0], d, dev)
-#
-#     # Nhỏ hyperparameter search
-#     best_acc, best_C, best_w_sc = -1.0, 1.0, None
-#     for C in [0.1, 1.0, 10.0]:
-#         w_sc = train_logistic_gpu(X_sc, y, C=C)
-#         acc  = ((X_sc @ w_sc > 0).float() == y).float().mean().item()
-#         if acc > best_acc:
-#             best_acc, best_C, best_w_sc = acc, C, w_sc.clone()
-#
-#     logger.info("  Best C=%.1f  train_acc=%.4f", best_C, best_acc)
-#
-#     # Unscale
-#     w_orig = (best_w_sc / std_).cpu()
-#     r = w_orig / w_orig.norm().clamp(min=1e-8)
-#     agop = torch.outer(w_orig, w_orig)  # rank-1, CPU
-#
-#     # Clear GPU cache
-#     del X, y, X_sc, mean_, std_, best_w_sc
-#     if torch.cuda.is_available():
-#         torch.cuda.empty_cache()
-#
-#     return agop, r
-
-
-def compute_agop_rfm(H_pos: torch.Tensor,
-                     H_neg: torch.Tensor,
-                     rfm_iters: int = 3,
-                     device: str = "cpu") -> tuple:
+def compute_concept_vector_layer(
+    H_pos: torch.Tensor,
+    H_neg: torch.Tensor,
+    probe: str = "rfm",
+    rfm_iters: int = 5,
+    n_components: int = 1,
+    tuning_metric: str = "auc",
+    val_ratio: float = 0.2,
+    seed: int = 42,
+    device: str = "cuda",
+) -> Tuple[torch.Tensor, torch.Tensor, dict]:
     """
-    Tính AGOP bằng full RFM. Cần: pip install xrfm
-    Fallback sang linear nếu xrfm không có.
+    Parameters
+    ----------
+    H_pos : (n_pos, d) activation của D_m (malicious), label y = 1
+    H_neg : (n_neg, d) activation của D_b (benign),    label y = 0
+            Hai tensor này đã được cân bằng/subsample ở tầng gọi.
 
-    Returns:
-        agop : [d,d] CPU
-        r    : [d]   CPU
+    Returns
+    -------
+    agop       : (d, d) trên CPU
+    components : (n_components, d) trên CPU, đã calibrate dấu
+    info       : dict
     """
-
-
     dev = torch.device(device)
-    N_pos, d = H_pos.shape
-    N_neg = H_neg.shape[0]
+    n_pos, d = H_pos.shape
+    n_neg = H_neg.shape[0]
 
-    X = torch.cat([H_pos, H_neg], dim=0).float().to(dev)
+    X = torch.cat([H_pos, H_neg], dim=0).float()
     y = torch.cat([
-        torch.ones(N_pos, 1, device=dev),
-        torch.zeros(N_neg, 1, device=dev)
-    ])
+        torch.ones(n_pos, 1),
+        torch.zeros(n_neg, 1),
+    ], dim=0).float()
 
-    # Stratified split (FIX B2)
-    pos_idx = (y.squeeze() == 1).nonzero(as_tuple=True)[0]
-    neg_idx = (y.squeeze() == 0).nonzero(as_tuple=True)[0]
-    nv_pos  = max(1, int(0.2 * len(pos_idx)))
-    nv_neg  = max(1, int(0.2 * len(neg_idx)))
-    val_idx   = torch.cat([pos_idx[:nv_pos], neg_idx[:nv_neg]])
-    train_idx = torch.cat([pos_idx[nv_pos:], neg_idx[nv_neg:]])
+    # ── R3: stratified split THỰC SỰ ngẫu nhiên ──────────────────────────────
+    # v2 dùng pos_idx[:nv_pos] → val positive toàn bộ là AdvBench, không có
+    # jailbreak nào (vì H_pos = cat([harmful_1000, jailbreak_1000]) và H_pos
+    # không bị shuffle khi len(H_pos) == n_min). Val AUC khi đó không đo được
+    # năng lực trên jailbreak — đúng distribution mà bài báo tuyên bố mạnh.
+    idx = np.arange(len(X))
+    tr_idx, va_idx = train_test_split(
+        idx,
+        test_size=val_ratio,
+        random_state=seed,
+        shuffle=True,
+        stratify=y.squeeze(-1).numpy(),
+    )
+    tr_idx = torch.from_numpy(tr_idx)
+    va_idx = torch.from_numpy(va_idx)
 
-    Xtr, ytr = X[train_idx], y[train_idx]
-    Xvl, yvl = X[val_idx],   y[val_idx]
+    train_X, train_y = X[tr_idx].to(dev), y[tr_idx].to(dev)
+    val_X, val_y = X[va_idx].to(dev), y[va_idx].to(dev)
 
-    best_model, best_auc = None, -1.0
-    for bw in [1.0, 10.0, 100.0]:
-        for reg in [1e-3, 1e-2]:
-            try:
-                m = RFM(kernel='l2_high_dim', bandwidth=bw, device=device)
-                m.fit((Xtr, ytr), (Xvl, yvl),
-                      reg=reg, iters=rfm_iters,
-                      center_grads=False, early_stop_rfm=True,
-                      # center_grads=True, early_stop_rfm=True,
-                      get_agop_best_model=True, top_k=1)
-                preds = m.predict(Xvl).cpu().numpy()
-                auc = roc_auc_score(yvl.cpu().numpy(), preds)
-                if auc > best_auc:
-                    best_auc = auc
-                    best_model = deepcopy(m)
-            except Exception as e:
-                logger.warning("  RFM bw=%.1f reg=%.0e failed: %s", bw, reg, e)
+    logger.info(
+        "  train %s / val %s  (pos ratio: train=%.3f val=%.3f)",
+        tuple(train_X.shape), tuple(val_X.shape),
+        train_y.mean().item(), val_y.mean().item(),
+    )
 
-    # if best_model is None:
-    #     logger.warning("  All RFM fits failed. Falling back to linear.")
-    #     return compute_agop_linear(H_pos, H_neg, device)
+    if probe == "rfm":
+        agop, info = train_rfm_probe_on_concept(
+            train_X, train_y, val_X, val_y,
+            rfm_iters=rfm_iters, n_components=n_components,
+            tuning_metric=tuning_metric, device=device,
+        )
+    elif probe == "linear":
+        agop, info = train_linear_probe_on_concept(train_X, train_y, val_X, val_y, device=device)
+    else:
+        raise ValueError(f"probe phải là 'rfm' hoặc 'linear', nhận: {probe}")
 
-    logger.info("  Best RFM AUC=%.4f", best_auc)
-    agop = best_model.agop_best_model.cpu()
+    # ── Top eigenvectors (RFMToolkit._compute_directions: components = U.T) ──
+    S, U = top_eigenvectors(agop, k=n_components)
+    components = U.T.contiguous()                      # (k, d)
+    logger.info("  AGOP top-%d eigenvalues: %s", n_components,
+                np.array2string(S.detach().cpu().numpy(), precision=4))
 
-    S, U = torch.lobpcg(agop, k=1)
-    r = U[:, 0]
-    proj = X.cpu() @ r
-    if torch.corrcoef(torch.stack([proj, y.squeeze().cpu()]))[0, 1] < 0:
-        r = -r
+    # ── R7: sign calibrate trên TRAIN split (mirror _compute_signs) ──────────
+    for c in range(n_components):
+        proj = project_onto_direction(train_X, components[c])
+        sign = 2 * (pearson_corr(train_y.squeeze(-1), proj) > 0).float() - 1
+        components[c] = components[c] * sign
+        info[f"corr_c{c}"] = float(pearson_corr(
+            train_y.squeeze(-1), project_onto_direction(train_X, components[c])))
 
-    del X, y, Xtr, ytr, Xvl, yvl
+    logger.info("  corr(Z_train @ r, y_train) = %+.4f  (>0 ⇒ r trỏ về lớp malicious)",
+                info["corr_c0"])
+
+    del X, y, train_X, train_y, val_X, val_y
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    return agop, r.cpu()
+    return agop.detach().cpu(), components.detach().cpu(), info
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PHẦN 2 — Per-layer computation
+# PHẦN 3 — Per-layer loop
 # ══════════════════════════════════════════════════════════════════════════════
 
-def compute_rfm_refusal_vectors(
-    H_refusal:        torch.Tensor,
-    H_compliant:      torch.Tensor,
-    layers:           list,
+def _balanced_indices(n_pos: int, n_neg: int, seed: int, max_per_class: Optional[int] = None
+                      ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    R4: sinh MỘT permutation cố định dùng chung cho MỌI layer.
+    v2 gọi randperm bên trong vòng lặp layer → mỗi layer dùng benign subset
+    khác nhau, khiến concept vector giữa các layer không so sánh được.
+    """
+    g = torch.Generator().manual_seed(seed)
+    n = min(n_pos, n_neg)
+    if max_per_class is not None:
+        n = min(n, max_per_class)
+    pos_sel = torch.randperm(n_pos, generator=g)[:n]
+    neg_sel = torch.randperm(n_neg, generator=g)[:n]
+    return pos_sel, neg_sel
+
+
+def compute_refusal_vectors(
+    H_malicious: torch.Tensor,      # (N_m, L, d) CPU
+    H_benign: torch.Tensor,         # (N_b, L, d) CPU
+    layers: Sequence[int],
     num_total_layers: int,
-    method:           str = "linear",
-    rfm_iters:        int = 3,
-    device:           str = "cpu",
-) -> np.ndarray:
+    probe: str = "rfm",
+    rfm_iters: int = 5,
+    n_components: int = 1,
+    tuning_metric: str = "auc",
+    balance: bool = True,
+    max_per_class: Optional[int] = None,
+    seed: int = 42,
+    device: str = "cuda",
+) -> Tuple[np.ndarray, dict]:
     """
-    Compute RFM refusal direction cho mỗi layer.
+    Returns
+    -------
+    refusal_vectors : (num_total_layers, d) float32 — layer không tính = zero
+                      (giữ đúng format pkl DIM của AlphaSteer)
+    meta            : dict[layer] -> info
+    """
+    assert H_malicious.dim() == 3 and H_benign.dim() == 3
+    assert H_malicious.shape[1] == H_benign.shape[1] == num_total_layers
+    d = H_malicious.shape[2]
 
-    Output: numpy [num_total_layers, d] float32 — giống DIM pkl của AlphaSteer.
-    Layers không compute = zero vector.
-    """
-    d = H_refusal.shape[2]
     refusal_vectors = np.zeros((num_total_layers, d), dtype=np.float32)
+    meta: Dict[int, dict] = {}
+
+    if balance:
+        pos_sel, neg_sel = _balanced_indices(
+            H_malicious.shape[0], H_benign.shape[0], seed=seed, max_per_class=max_per_class)
+        logger.info("Balanced: %d pos / %d neg (permutation cố định cho mọi layer)",
+                    len(pos_sel), len(neg_sel))
+    else:
+        pos_sel = torch.arange(H_malicious.shape[0])
+        neg_sel = torch.arange(H_benign.shape[0])
 
     for layer_idx in layers:
         logger.info("=== Layer %d ===", layer_idx)
+        h_pos = H_malicious[pos_sel, layer_idx, :].float()
+        h_neg = H_benign[neg_sel, layer_idx, :].float()
 
-        h_pos = H_refusal[:, layer_idx, :].float()   # CPU
-        h_neg = H_compliant[:, layer_idx, :].float()  # CPU
+        _, components, info = compute_concept_vector_layer(
+            h_pos, h_neg,
+            probe=probe, rfm_iters=rfm_iters, n_components=n_components,
+            tuning_metric=tuning_metric, seed=seed, device=device,
+        )
 
-        # Balance
-        n_min = min(len(h_pos), len(h_neg))
-        if len(h_pos) > n_min:
-            h_pos = h_pos[torch.randperm(len(h_pos))[:n_min]]
-        if len(h_neg) > n_min:
-            h_neg = h_neg[torch.randperm(len(h_neg))[:n_min]]
+        r = components[0]
+        r = r / r.norm().clamp(min=1e-8)   # lobpcg đã trả unit vector; ép lại cho chắc
+        refusal_vectors[layer_idx] = r.numpy()
+        meta[layer_idx] = info
+        logger.info("  ||r[%d]|| = %.6f", layer_idx, float(np.linalg.norm(refusal_vectors[layer_idx])))
 
-        _, r = compute_agop_rfm(h_pos, h_neg, rfm_iters=rfm_iters, device=device)
-
-        refusal_vectors[layer_idx] = r.float().numpy()
-        logger.info("  r[%d] norm=%.6f", layer_idx, np.linalg.norm(refusal_vectors[layer_idx]))
-
-    return refusal_vectors
+    return refusal_vectors, meta
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PHẦN 3 — Load data + main
+# PHẦN 4 — Load embeddings
 # ══════════════════════════════════════════════════════════════════════════════
 
-def load_alphasteer_embeddings(embedding_dir: str):
-    """Load theo đúng calc_steering_matrix.py gốc (dòng 3905-3926)."""
+def load_alphasteer_embeddings(embedding_dir: str, seed: int = 42, include_math: bool = False):
+    """
+    Load D_m (malicious) và D_b (benign) theo đúng calc_steering_matrix.py gốc.
+
+    QUAN TRỌNG — số liệu thật (đối chiếu manuscript):
+      D_m = 1000 (harmful_train) + 1000 (jailbreak_train subsample) = 2,000
+            → KHÔNG phải 2,720 như manuscript ghi (2,720 = 720 + 2,000, đếm trùng)
+      D_b = 10,000 (alpaca) + 4,000 (coconot) = 14,000
+            → KHÔNG phải 14,900; 900 mẫu MATH KHÔNG nằm trong D_b (đúng với gốc).
+              Bật include_math=True nếu muốn khớp con số 14,900 trong bài.
+
+    Dùng torch.Generator có seed → reproducible và ĐỘC LẬP với RNG global,
+    nên gọi hàm này nhiều lần luôn cho cùng subset (v2 dùng torch.randperm
+    global nên hai lần gọi cho hai subset khác nhau).
+    """
     logger.info("Loading embeddings from %s", embedding_dir)
+    g = torch.Generator().manual_seed(seed)
 
-    def _load(fname):
-        t = torch.load(os.path.join(embedding_dir, fname), map_location="cpu")
-        return t.float()  # FIX B4: luôn float32
+    def _load(fname: str) -> torch.Tensor:
+        path = os.path.join(embedding_dir, fname)
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        return torch.load(path, map_location="cpu").float()   # luôn float32
 
-    H_benign_10k   = _load("embeds_benign_train.pt")
+    # ── D_b (benign / compliant) ────────────────────────────────────────────
+    H_alpaca = _load("embeds_benign_train.pt")            # 10,000
     H_coconot_pref = _load("embeds_coconot_pref.pt")
     H_coconot_orig = _load("embeds_coconot_original.pt")
-    idx_b = torch.randperm(H_coconot_orig.size(0))[:4000 - H_coconot_pref.size(0)]
-    H_compliant = torch.cat([H_benign_10k, H_coconot_orig[idx_b], H_coconot_pref], dim=0)
+    n_borderline = 4000 - H_coconot_pref.size(0)
+    idx_b = torch.randperm(H_coconot_orig.size(0), generator=g)[:n_borderline]
+    parts = [H_alpaca, H_coconot_orig[idx_b], H_coconot_pref]
+    if include_math:
+        parts.append(_load("embeds_math_train.pt"))       # 900
+    H_benign = torch.cat(parts, dim=0)
 
-    H_harmful = _load("embeds_harmful_train_1000.pt")
-    H_jailbreak = _load("embeds_jailbreak_train.pt")
-    idx_jb = torch.randperm(H_jailbreak.size(0))[:1000]
-    H_refusal = torch.cat([H_harmful, H_jailbreak[idx_jb]], dim=0)
+    # ── D_m (malicious) ─────────────────────────────────────────────────────
+    H_harmful = _load("embeds_harmful_train_1000.pt")     # 1,000
+    H_jb_full = _load("embeds_jailbreak_train.pt")
+    idx_jb = torch.randperm(H_jb_full.size(0), generator=g)[:1000]
+    H_malicious = torch.cat([H_harmful, H_jb_full[idx_jb]], dim=0)
 
-    logger.info("H_refusal   %s (proxy Dr)", tuple(H_refusal.shape))
-    logger.info("H_compliant %s (proxy Dc)", tuple(H_compliant.shape))
-    return H_refusal, H_compliant
+    logger.info("D_m (malicious) %s", tuple(H_malicious.shape))
+    logger.info("D_b (benign)    %s", tuple(H_benign.shape))
+    return H_malicious, H_benign
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CLI
+# ══════════════════════════════════════════════════════════════════════════════
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--embedding_dir", required=True)
-    p.add_argument("--model_name", required=True, choices=["llama3.1", "qwen2.5", "gemma2"])
-    p.add_argument("--method", default="linear", choices=["linear", "rfm"])
-    p.add_argument("--rfm_iters", type=int, default=3)
+    p.add_argument("--layers", required=True,
+                   help="Comma-separated, vd '8,9,10,11,12,13,14,16,18,19'")
+    # R6: tham số này giờ THỰC SỰ có tác dụng (v2 bỏ qua hoàn toàn `method`)
+    p.add_argument("--probe", default="rfm", choices=["rfm", "linear"])
+    p.add_argument("--rfm_iters", type=int, default=5,
+                   help="Reference dùng hyperparams['rfm_iters']; manuscript ghi T∈{1,2,5,10}")
+    p.add_argument("--n_components", type=int, default=1)
+    p.add_argument("--tuning_metric", default="auc", choices=["auc", "acc", "f1", "mse"])
+    p.add_argument("--max_per_class", type=int, default=None)
+    p.add_argument("--include_math", action="store_true")
     p.add_argument("--device", default="cuda")
     p.add_argument("--save_path", required=True)
     p.add_argument("--seed", type=int, default=42)
@@ -308,25 +559,27 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    torch.manual_seed(args.seed)   # FIX B5
+    torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    disable_tf32()   # RFM/AGOP cũng nhạy với TF32 khi d lớn
 
-    H_refusal, H_compliant = load_alphasteer_embeddings(args.embedding_dir)
-    num_total_layers = H_refusal.shape[1]
-    d = H_refusal.shape[2]
-    layers = STEERING_LAYERS[args.model_name]
+    layers = [int(x) for x in args.layers.split(",") if x.strip()]
+    H_m, H_b = load_alphasteer_embeddings(args.embedding_dir, seed=args.seed,
+                                          include_math=args.include_math)
+    num_total_layers = H_m.shape[1]
 
-    logger.info("model=%s layers=%s d=%d method=%s device=%s",
-                args.model_name, layers, d, args.method, args.device)
+    logger.info("layers=%s d=%d probe=%s metric=%s device=%s",
+                layers, H_m.shape[2], args.probe, args.tuning_metric, args.device)
 
-    rv = compute_rfm_refusal_vectors(
-        H_refusal=H_refusal, H_compliant=H_compliant,
+    rv, meta = compute_refusal_vectors(
+        H_malicious=H_m, H_benign=H_b,
         layers=layers, num_total_layers=num_total_layers,
-        method=args.method, rfm_iters=args.rfm_iters, device=args.device,
+        probe=args.probe, rfm_iters=args.rfm_iters,
+        n_components=args.n_components, tuning_metric=args.tuning_metric,
+        max_per_class=args.max_per_class, seed=args.seed, device=args.device,
     )
 
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.save_path)), exist_ok=True)
     with open(args.save_path, "wb") as f:
-        pickle.dump(rv, f)
-
+        pickle.dump({"refusal_vectors": rv, "meta": meta, "layers": layers}, f)
     logger.info("Saved → %s  shape=%s", args.save_path, rv.shape)

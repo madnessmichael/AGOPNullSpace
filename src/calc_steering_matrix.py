@@ -58,9 +58,9 @@ if __name__ == "__main__":
 
 
     # Load benign embeddings
-    H_benign_train_10000 = torch.load(f"{embeds_dir}/embeds_benign_train.pt", map_location=device).float()
-    H_coconot_pref = torch.load(f"{embeds_dir}/embeds_coconot_pref.pt", map_location=device).float()
-    H_coconot_original = torch.load(f"{embeds_dir}/embeds_coconot_original.pt", map_location=device).float()
+    H_benign_train_10000 = torch.load(f"{embeds_dir}/embeds_benign_train.pt", map_location="cpu").float()
+    H_coconot_pref = torch.load(f"{embeds_dir}/embeds_coconot_pref.pt", map_location="cpu").float()
+    H_coconot_original = torch.load(f"{embeds_dir}/embeds_coconot_original.pt", map_location="cpu").float()
 
     # Sample a subset of borderline examples to balance the dataset
     indices_borderline = torch.randperm(H_coconot_original.size(0))[:4000 - H_coconot_pref.size(0)]
@@ -72,8 +72,8 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
 
     # Load harmful embeddings
-    H_harmful_train_1000 = torch.load(f"{embeds_dir}/embeds_harmful_train_1000.pt", map_location=device).float()
-    H_jailbreak_train_full = torch.load(f"{embeds_dir}/embeds_jailbreak_train.pt", map_location=device).float()
+    H_harmful_train_1000 = torch.load(f"{embeds_dir}/embeds_harmful_train_1000.pt", map_location="cpu").float()
+    H_jailbreak_train_full = torch.load(f"{embeds_dir}/embeds_jailbreak_train.pt", map_location="cpu").float()
 
     # Sample a subset of jailbreak examples
     indices = torch.randperm(H_jailbreak_train_full.size(0))[:1000]

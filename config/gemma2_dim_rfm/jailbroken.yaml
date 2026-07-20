@@ -1,0 +1,10 @@
+device: cuda:2
+model_name: gemma2
+steering_matrix_path: data/steering_matrix/steering_matrix_gemma2_dim_data1hh.pt
+input_file: data/instructions/test/gemma2/jailbroken_gemma2.json
+output_file: data/responses/gemma2/jailbroken_gemma2_rfm_results_gemma2_dim.json
+batch_size: 1
+max_new_tokens: 128
+file_rename: False
+prompt_column: query
+strength: "-7.0,-5.0,-3.5,-3.0,-2.5,-2.0,-1.5,-1.0,0.0,1.0,1.5,2.0,2.5,3.0,3.5,5.0,7.0"
