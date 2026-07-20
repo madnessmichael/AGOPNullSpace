@@ -1,34 +1,68 @@
 """
-calc_steering_matrix_rfm_hh.py  (v3)
+calc_steering_matrix_rfm_hh.py  (v4)
 =================================
 Drop-in replacement cho src/calc_steering_matrix.py của AlphaSteer.
-Thay đổi duy nhất về mặt phương pháp: refusal vector từ RFM/AGOP thay vì DIM.
+Thay đổi duy nhất về mặt phương pháp: refusal vector từ RFM/AGOP thay vì DIM,
+tính trên justinphan3110/harmful_harmless_instructions.
 
-THAY ĐỔI SO VỚI v2:
-  D1. v2 load embeddings HAI LẦN: một lần thủ công ở bước 1 (H_benign_train /
-      H_harmful_train), một lần nữa qua load_alphasteer_embeddings() ở bước 2.
-      Cả hai đều gọi torch.randperm trên RNG global ⇒ subset jailbreak dùng cho
-      RFM KHÁC subset dùng cho regression. Manuscript nói "the full set fits Δ̃"
-      — không nhất quán, và tốn gấp đôi RAM (~15 GB thừa ở 8B).
-      → Fix: load MỘT lần, dùng chung cho cả RFM lẫn regression.
+THAY ĐỔI SO VỚI v2 → v3 (giữ nguyên, xem chi tiết bên dưới): D1-D5.
 
-  D2. v2 cấp phát P / tilde_delta / steering_matrix mỗi cái (L, d, d) float32
-      trên CPU. Ở 70B: 80 × 8192² × 4 B = 21.5 GB MỖI tensor = 64 GB RAM,
-      rồi torch.save ghi file 21.5 GB dù chỉ 26 layer khác 0.
-      → Fix: P và tilde_delta là biến tạm trong vòng lặp (không lưu mảng);
-        steering_matrix lưu dạng dict {layer: (d,d)} (mặc định) → 70B còn ~7 GB.
-        --save_format dense vẫn có nếu cần tương thích ngược tuyệt đối.
+THAY ĐỔI MỚI Ở v4 (phát hiện khi viết calc_steering_matrix_dim_hh.py và
+calc_steering_matrix_rfm_no_nullspace.py — cả hai đều cần import lại logic ở
+đây, và việc đó lộ ra các chỗ sau):
 
-  D3. `P[layer] = P_layer` gán cross-device (CUDA → CPU) ngầm.
-      → Fix: .cpu() tường minh.
+  D6. [BUG NGHIÊM TRỌNG] v3 làm:
+          num_total_layers = H_harmless_all.shape[1]
+          d_model           = H_harmless_all.shape[2]
+      NGAY SAU khi đã dùng num_total_layers (từ H_benign của AlphaSteer, bước 1)
+      để KHÔNG làm gì trong bước đó — nhưng biến này được DÙNG LẠI ở bước 4 để
+      cấp phát `dense = torch.zeros(num_total_layers, d_model, d_model)`. Nếu
+      HH embeddings bị lệch 1 layer so với AlphaSteer (rất có thể, xem 3 bug
+      E1-E3 trong calc_steering_matrix_dim_hh.py — ví dụ hidden_states có/không
+      bao gồm embedding layer), việc ghi đè này khiến `dense` được cấp phát với
+      SỐ LAYER SAI so với model thật, mà KHÔNG có bất kỳ cảnh báo/lỗi nào — chỉ
+      lộ ra sau này dưới dạng shape mismatch khó hiểu ở generate.py, hoặc tệ hơn,
+      không lộ ra gì cả nếu con số tình cờ tương thích.
+      → Fix: num_total_layers/d_model LUÔN lấy từ AlphaSteer (H_benign, bước 1)
+        — đây là nguồn dùng để fit null-space P và cấp phát dense tensor, nên
+        phải là nguồn tham chiếu duy nhất. HH tensors được VALIDATE và CẮT cho
+        khớp AlphaSteer, không phải ngược lại. Lệch quá ±1 layer → raise ngay,
+        không âm thầm dùng.
+        (Hướng cắt +1 — bỏ layer đầu hay cuối — VẪN CHƯA verify thực nghiệm;
+        xem cảnh báo log bên dưới và cross-check bằng cos_vs_reference/
+        separation_ratio trước khi tin kết quả nếu nhánh này được kích hoạt.)
 
-  D4. Ghi lại metadata (ρ per-layer, bandwidth/reg/center_grads được chọn,
-      leakage benign held-out) vào sidecar JSON — chính là các con số manuscript
-      đang ghi sai (ρ=0.6 đồng nhất, T∈{1,2,5,10}, N_m=2720, N_b=14900).
+  D7. [BUG] `load_harmful_harmless_instruction_embeddings` được gọi với CẢ BỐN
+      path (harmful/harmless VÀ embeddings/labels) luôn luôn non-None (dựng
+      bằng os.path.join). Điều kiện chọn nhánh trong hàm là `if harmful_path
+      and harmless_path:` — chỉ kiểm tra CHUỖI có rỗng hay không, KHÔNG kiểm
+      tra file có tồn tại. Hậu quả: nhánh "combined embeddings + labels" KHÔNG
+      BAO GIỜ được dùng trong thực tế dù bạn truyền --hh_embeddings_path/
+      --hh_labels_path hợp lệ, vì nhánh separated luôn được chọn trước và
+      crash bằng FileNotFoundError khó hiểu nếu embeds_hh_harmful.pt không tồn
+      tại — thay vì fallback rõ ràng hoặc thông báo hữu ích.
+      → Fix: kiểm tra os.path.exists() cho cả hai cặp, chọn nhánh theo cái nào
+        THỰC SỰ có trên đĩa (giống pattern load_hh_embeddings() của
+        calc_steering_matrix_dim_hh.py), raise với thông báo liệt kê đủ 4 path
+        đã thử nếu không cặp nào tồn tại.
 
-  D5. Thêm --holdout_benign: tách một phần D_b ra KHÔNG dùng để fit P, để đo
-      leakage thật. Bài đang claim "provable near-zero by construction" mà
-      không có số liệu held-out nào.
+  D8. [THIẾU] meta.json không ghi concept_source/concept_data — không phân
+      biệt được (khi đọc lại meta) rằng r ở đây đến từ HH chứ không phải từ
+      AlphaSteer D_m/D_b như DIM gốc. → thêm "concept_source": DATASET_NAME,
+      "concept_data": {n_harmful, n_harmless}, và "gate_data"/"nullspace_data"
+      để nhất quán với meta của calc_steering_matrix_dim_hh.py.
+
+  D9. [KHOA HỌC] seed default của file này là 2706, của
+      calc_steering_matrix_dim_hh.py là 42. Cả hai default đều truyền vào
+      load_alphasteer_embeddings(seed=...), quyết định subset jailbreak/coconot
+      của D_m/D_b VÀ benign holdout split. Nếu so sánh DIM-HH vs RFM-HH (ô 2×2
+      trong docstring của calc_steering_matrix_dim_hh.py) mà không truyền
+      --seed tường minh giống nhau ở cả hai lệnh gọi, hai bản dùng hai tập D_m/
+      D_b khác nhau → so sánh không còn hợp lệ. → cảnh báo rõ trong help text.
+
+  D10. Thêm --hh_harmful_path/--hh_harmless_path/--hh_embeddings_path/
+       --hh_labels_path override args, khớp giao diện của
+       calc_steering_matrix_dim_hh.py và calc_steering_matrix_rfm_no_nullspace.py.
 
 Cách dùng:
     python src/calc_steering_matrix_rfm_hh.py \
@@ -36,7 +70,7 @@ Cách dùng:
         --embedding_dir data/embeddings/llama3.1 \
         --device cuda \
         --save_path data/steering_matrix/steering_matrix_llama3.1_agopn.pt \
-        --probe rfm --rfm_iters 5 --lambda_reg 10.0
+        --probe rfm --rfm_iters 5 --lambda_reg 10.0 --seed 2706
 """
 
 from __future__ import annotations
@@ -73,8 +107,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-
 DATASET_NAME = "justinphan3110/harmful_harmless_instructions"
+
 
 def _assert_activation_shape(name: str, H: torch.Tensor) -> None:
     if H.ndim != 3:
@@ -126,6 +160,7 @@ def _load_labels(path: str) -> torch.Tensor:
     labels = labels.reshape(-1).to(torch.int64)
     return labels
 
+
 def balance_harmful_harmless_embeddings(
     H_harmful: torch.Tensor,
     H_harmless: torch.Tensor,
@@ -161,6 +196,7 @@ def balance_harmful_harmless_embeddings(
     )
     return Hh, Hs
 
+
 def load_harmful_harmless_instruction_embeddings(
     embeddings_path: str = None,
     labels_path: str = None,
@@ -193,21 +229,28 @@ def load_harmful_harmless_instruction_embeddings(
          True/1  = harmless
          False/0 = harmful
 
+    D7: chọn nhánh theo file NÀO THỰC SỰ TỒN TẠI trên đĩa, không phải theo
+    chuỗi path có rỗng hay không. Trước đây `harmful_path`/`harmless_path`
+    luôn được truyền vào (dựng sẵn bằng os.path.join ở call site) nên nhánh
+    separated luôn được chọn, kể cả khi file không tồn tại và người dùng thực
+    ra có sẵn combined format — kết quả là FileNotFoundError khó hiểu thay vì
+    fallback đúng nhánh hoặc thông báo rõ ràng.
+
     Returns:
         H_harmful:  [N_harmful,  num_layers, d_model] float32 CPU
         H_harmless: [N_harmless, num_layers, d_model] float32 CPU
     """
-    if harmful_path and harmless_path:
-        logger.info("Loading separated harmful/harmless embeddings from HF dataset...")
+    have_separated = bool(harmful_path) and bool(harmless_path) and \
+        os.path.exists(harmful_path) and os.path.exists(harmless_path)
+    have_combined = bool(embeddings_path) and bool(labels_path) and \
+        os.path.exists(embeddings_path) and os.path.exists(labels_path)
+
+    if have_separated:
+        logger.info("HH source: SEPARATED files (%s / %s)", harmful_path, harmless_path)
         H_harmful = _load_tensor_or_dict(harmful_path)
         H_harmless = _load_tensor_or_dict(harmless_path)
-    else:
-        if not embeddings_path or not labels_path:
-            raise ValueError(
-                "Provide either (--hh_harmful_path and --hh_harmless_path) "
-                "or (--hh_embeddings_path and --hh_labels_path)."
-            )
-        logger.info("Loading combined HH embeddings: %s", embeddings_path)
+    elif have_combined:
+        logger.info("HH source: COMBINED + labels (%s)", embeddings_path)
         H = _load_tensor_or_dict(embeddings_path)
         y = _load_labels(labels_path)
         _assert_activation_shape("HH combined embeddings", H)
@@ -216,12 +259,19 @@ def load_harmful_harmless_instruction_embeddings(
                 f"Embedding/label length mismatch: embeddings N={H.shape[0]}, labels N={y.numel()}. "
                 "If your HF dataset rows are pairs, flatten both sentence and label before activation extraction."
             )
-
         # HF label=True means harmless; label=False means harmful.
         harmless_mask = y.bool()
         harmful_mask = ~harmless_mask
         H_harmful = H[harmful_mask].contiguous().float()
         H_harmless = H[harmless_mask].contiguous().float()
+    else:
+        raise FileNotFoundError(
+            "Không tìm thấy HH embeddings. Đã thử:\n"
+            f"  separated: {harmful_path} / {harmless_path}\n"
+            f"  combined : {embeddings_path} / {labels_path}\n"
+            "Chạy prepare_harmful_harmless_instruction_embeddings.py trước "
+            "(--save_separated để có cả hai định dạng)."
+        )
 
     _assert_activation_shape("H_harmful", H_harmful)
     _assert_activation_shape("H_harmless", H_harmless)
@@ -283,6 +333,7 @@ def load_balanced_embeddings(
         seed=seed,
     )
 
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model_name", required=True)
@@ -298,6 +349,13 @@ def parse_args():
     p.add_argument("--include_math", action="store_true",
                    help="Thêm 900 mẫu MATH vào D_b để khớp con số 14,900 trong manuscript. "
                         "Mặc định TẮT — khớp AlphaSteer gốc, D_b = 14,000.")
+    # D10: HH overrides — khớp giao diện của calc_steering_matrix_dim_hh.py /
+    # calc_steering_matrix_rfm_no_nullspace.py. Mặc định None ⇒ tự dò trong
+    # {embedding_dir}/harmful_harmless_instructions/.
+    p.add_argument("--hh_harmful_path", default=None)
+    p.add_argument("--hh_harmless_path", default=None)
+    p.add_argument("--hh_embeddings_path", default=None)
+    p.add_argument("--hh_labels_path", default=None)
     # Regression
     p.add_argument("--lambda_reg", type=float, default=10.0)
     # Numerics
@@ -313,7 +371,12 @@ def parse_args():
                    help="dense (MẶC ĐỊNH): tensor [L,d,d] float32 GIỐNG HỆT AlphaSteer/DIM. "
                         "So sánh trực tiếp với *_dim.pt và ma trận cũ. rank1/sparse chỉ dùng "
                         "khi cần tiết kiệm bộ nhớ và bạn chủ động chọn.")
-    p.add_argument("--seed", type=int, default=2706)
+    p.add_argument("--seed", type=int, default=2706,
+                   help="⚠ D9: calc_steering_matrix_dim_hh.py default=42, file này "
+                        "default=2706. Seed quyết định subset jailbreak/coconot của D_m/D_b "
+                        "VÀ benign holdout split (qua load_alphasteer_embeddings). Nếu so "
+                        "sánh DIM-HH vs RFM-HH, truyền --seed TƯỜNG MINH giống nhau ở cả hai "
+                        "lệnh gọi, đừng dựa vào default của từng file.")
     return p.parse_args()
 
 
@@ -331,10 +394,13 @@ def main():
 
     # ══ 1. Load embeddings — MỘT LẦN DUY NHẤT (D1) ═══════════════════════════
     # v2 load 2 lần với 2 permutation khác nhau ⇒ RFM và regression thấy 2 tập
-    # jailbreak khác nhau. Ở đây H_malicious/H_benign được dùng cho CẢ HAI.
+    # jailbreak khác nhau. Ở đây H_malicious/H_benign được dùng cho gate/null-space.
     H_malicious, H_benign = load_alphasteer_embeddings(
         args.embedding_dir, seed=args.seed, include_math=args.include_math)
 
+    # D6: num_total_layers/d_model LUÔN lấy từ AlphaSteer — đây là nguồn tham
+    # chiếu DUY NHẤT cho layer-indexing của null-space P, gate u, và dense
+    # tensor ở bước 4. KHÔNG bị ghi đè bởi shape của HH ở bước 2 nữa.
     num_total_layers = H_benign.shape[1]
     d_model = H_benign.shape[2]
 
@@ -348,22 +414,50 @@ def main():
     logger.info("D_b: %d fit / %d held-out | D_m: %d | L=%d d=%d",
                 len(fit_idx), len(ho_idx), H_malicious.shape[0], num_total_layers, d_model)
 
-    # ══ 2. Concept vectors qua RFM/AGOP ══════════════════════════════════════
+    # ══ 2. Concept vectors qua RFM/AGOP trên HH dataset ═══════════════════════
     # *** ĐIỂM THAY ĐỔI DUY NHẤT so với AlphaSteer gốc ***
-    #   Gốc: refusal_vectors = pickle.load(RV_PATH)     → DIM
-    #   Mới: compute_refusal_vectors(...)               → AGOP top eigenvector
+    #   Gốc: refusal_vectors = pickle.load(RV_PATH)          → DIM
+    #   Đây: compute_refusal_vectors(...) trên HH             → AGOP top eigenvector
     logger.info("Computing %s concept vectors (metric=%s, iters=%d)...",
                 args.probe.upper(), args.tuning_metric, args.rfm_iters)
 
-
     H_harmful_all, H_harmless_all = load_harmful_harmless_instruction_embeddings(
-        embeddings_path=os.path.join( args.embedding_dir, "harmful_harmless_instructions/embeds_harmful_harmless_instructions.pt"),
-        labels_path=os.path.join(args.embedding_dir, "harmful_harmless_instructions/labels_harmful_harmless_instructions.pt"),
-        harmful_path=os.path.join( args.embedding_dir, "harmful_harmless_instructions/embeds_hh_harmful.pt"),
-        harmless_path=os.path.join( args.embedding_dir, "harmful_harmless_instructions/embeds_hh_harmless.pt"),
+        embeddings_path=args.hh_embeddings_path or os.path.join(
+            args.embedding_dir, "harmful_harmless_instructions",
+            "embeds_harmful_harmless_instructions.pt"),
+        labels_path=args.hh_labels_path or os.path.join(
+            args.embedding_dir, "harmful_harmless_instructions",
+            "labels_harmful_harmless_instructions.pt"),
+        harmful_path=args.hh_harmful_path or os.path.join(
+            args.embedding_dir, "harmful_harmless_instructions", "embeds_hh_harmful.pt"),
+        harmless_path=args.hh_harmless_path or os.path.join(
+            args.embedding_dir, "harmful_harmless_instructions", "embeds_hh_harmless.pt"),
         balance=False,
         seed=args.seed,
     )
+
+    # D6: validate/cắt HH cho KHỚP num_total_layers/d_model của AlphaSteer,
+    # KHÔNG ghi đè num_total_layers/d_model bằng shape của HH như v3.
+    if H_harmless_all.shape[1] == num_total_layers + 1:
+        logger.warning(
+            "HH có %d layer-entries (= AlphaSteer + 1) → cắt bỏ 1 entry để khớp convention "
+            "AlphaSteer (nghi do bug E1, xem calc_steering_matrix_dim_hh.py). ⚠ HƯỚNG CẮT "
+            "(đầu hay cuối) CHƯA verify thực nghiệm — cross-check bằng separation_ratio "
+            "per-layer hoặc cos với r của một bản DIM-HH/RFM-HH đã biết đúng, trước khi tin "
+            "kết quả.", H_harmless_all.shape[1])
+        H_harmful_all = H_harmful_all[:, :num_total_layers, :]
+        H_harmless_all = H_harmless_all[:, :num_total_layers, :]
+    elif H_harmless_all.shape[1] != num_total_layers:
+        raise ValueError(
+            f"HH có {H_harmless_all.shape[1]} layers, AlphaSteer có {num_total_layers}. "
+            f"Không khớp và không phải +1 → kiểm tra lại extraction/convention trước khi "
+            f"chạy tiếp.")
+    if H_harmless_all.shape[2] != d_model:
+        raise ValueError(f"d mismatch: HH d={H_harmless_all.shape[2]} vs AlphaSteer d={d_model}.")
+
+    # Ghi lại số liệu HH GỐC (trước balance) cho meta — khớp convention của
+    # calc_steering_matrix_dim_hh.py.
+    n_hh_harmful, n_hh_harmless = int(H_harmful_all.shape[0]), int(H_harmless_all.shape[0])
 
     H_rfm_harmful, H_rfm_harmless = balance_harmful_harmless_embeddings(
         H_harmful_all,
@@ -371,31 +465,13 @@ def main():
         balance_ratio=1.0,
         seed=args.seed,
     )
-
-    num_total_layers = H_harmless_all.shape[1]
-    d_model = H_harmless_all.shape[2]
-
-
-    # refusal_vectors_np, probe_meta = compute_refusal_vectors(
-    #     H_malicious=H_malicious,
-    #     H_benign=H_benign_fit,          # cùng tập với tập fit P
-    #     layers=layers,
-    #     num_total_layers=num_total_layers,
-    #     probe=args.probe,
-    #     rfm_iters=args.rfm_iters,
-    #     n_components=args.n_components,
-    #     tuning_metric=args.tuning_metric,
-    #     max_per_class=args.max_per_class,
-    #     seed=args.seed,
-    #     device=args.device,
-    # )
-
+    del H_harmful_all, H_harmless_all
 
     refusal_vectors_np, probe_meta = compute_refusal_vectors(
         H_malicious=H_rfm_harmful,
-        H_benign=H_rfm_harmless,          # cùng tập với tập fit P
+        H_benign=H_rfm_harmless,
         layers=layers,
-        num_total_layers=num_total_layers,
+        num_total_layers=num_total_layers,   # từ AlphaSteer, đã validate ở trên
         probe=args.probe,
         rfm_iters=args.rfm_iters,
         n_components=args.n_components,
@@ -407,14 +483,11 @@ def main():
 
     del H_rfm_harmful, H_rfm_harmless
 
-
     refusal_vectors = torch.from_numpy(refusal_vectors_np).float()
     logger.info("refusal_vectors %s dtype=%s  (||r||=1 với mọi layer)",
                 tuple(refusal_vectors.shape), refusal_vectors.dtype)
 
     # ══ 3. Null space + regression + steering factors ════════════════════════
-    # D2/D6: KHÔNG cấp phát mảng (L,d,d) nào. M luôn là RANK-1 (M = u⊗r, xem
-    # block giải thích ở đầu steering_utils.py) nên ta chỉ lưu (u, r).
     factors: dict[int, dict] = {}
     diagnostics: dict[str, dict] = {}
 
@@ -423,28 +496,23 @@ def main():
         logger.info("=== layer %d (ρ=%.2f) ===", layer, ratio)
 
         h_b = H_benign_fit[:, layer, :].to(device).float()
-        # V4: trả về CƠ SỞ Q (d, k), KHÔNG dựng P (d, d). Tránh luôn assert P²=P
-        # từng fail giả trên GPU có TF32.
         ns_dtype = torch.float64 if args.nullspace_dtype == "float64" else None
         Q_layer = null_space_basis_l(h_b, abs_nullspace_ratio=ratio, dtype=ns_dtype)
-        Q_layer = Q_layer.float()   # hạ về fp32 cho phần regression (đủ, và nhanh)
+        Q_layer = Q_layer.float()
         del h_b
 
-        # D5: leakage benign held-out. ||P h|| = ||Qᵀh|| (Q trực chuẩn) ⇒ chỉ cần Q.
         leak = benign_leakage(H_benign_ho[:, layer, :], Q_layer)
         logger.info("  benign held-out leakage ||Qᵀh||/||h||: mean=%.4f p95=%.4f max=%.4f",
                     leak["leakage_mean"], leak["leakage_p95"], leak["leakage_max"])
 
         h_m = H_malicious[:, layer, :].to(device).float()
-        # Giải trong không gian k chiều: SPD ⇒ Cholesky, KHÔNG pinv của cond ~1e20
         u, r = cal_steering_factors_q(
             h_m, Q_layer, refusal_vectors[layer].to(device),
             lambda_reg=args.lambda_reg, device=args.device)
         del h_m, Q_layer
 
-        factors[layer] = {"u": u.detach().cpu(), "r": r.detach().cpu()}   # D3
+        factors[layer] = {"u": u.detach().cpu(), "r": r.detach().cpu()}
 
-        # Gate uᵀh chính là "prompt classifier" ẩn của phương pháp.
         st_m = steering_signal_stats(H_malicious[:1000, layer, :], u, r)
         st_b = steering_signal_stats(H_benign_ho[:, layer, :], u, r)
         sel = st_m["mean_signal_norm"] / max(st_b["mean_signal_norm"], 1e-12)
@@ -473,16 +541,11 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(args.save_path)), exist_ok=True)
 
     if args.save_format == "dense":
-        # MẶC ĐỊNH: tensor [L, d, d] float32 — GIỐNG HỆT AlphaSteer/DIM.
-        # Load được bằng MỌI code cũ; so sánh trực tiếp với *_dim.pt bằng
-        # torch.load rồi trừ/norm/svd như bình thường.
         dense = torch.zeros(num_total_layers, d_model, d_model, dtype=torch.float32)
         for layer, f in factors.items():
             dense[layer] = torch.outer(f["u"], f["r"])   # M = P Δ̃ = u rᵀ
-        torch.save(dense, args.save_path)                # KHÔNG cast bfloat16
+        torch.save(dense, args.save_path)
     elif args.save_format == "rank1":
-        # Tùy chọn tiết kiệm bộ nhớ (70B: 7.0 GB → 1.7 MB). CHỈ dùng khi bạn
-        # chủ động chọn và AlphaSteerModel v3 đọc được format này.
         torch.save({
             "format": "rank1_v1", "num_layers": num_total_layers,
             "d_model": d_model, "layers": layers, "factors": factors,
@@ -497,6 +560,11 @@ def main():
     meta = {
         "model_name": args.model_name,
         "probe": args.probe,
+        # D8: ghi rõ nguồn r — HH, không phải AlphaSteer D_m/D_b.
+        "concept_source": DATASET_NAME,
+        "concept_data": {"n_harmful": n_hh_harmful, "n_harmless": n_hh_harmless},
+        "gate_data": "alphasteer_malicious",     # u fit trên D_m AlphaSteer
+        "nullspace_data": "alphasteer_benign",   # P từ D_b AlphaSteer
         "rfm_iters": args.rfm_iters,
         "tuning_metric": args.tuning_metric,
         "lambda_reg": args.lambda_reg,
@@ -517,7 +585,7 @@ def main():
         json.dump(meta, f, indent=2)
 
     logger.info("Saved → %s (format=%s)", args.save_path, args.save_format)
-
+    logger.info("Meta  → %s", meta_path)
     logger.info("Total time: %.1fs", time.time() - t0)
 
 

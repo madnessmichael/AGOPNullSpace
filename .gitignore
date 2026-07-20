@@ -27,6 +27,7 @@ venv/
 # Generated outputs
 data/embeddings/
 data/responses/
+data/responses_v1/
 data/steering_matrix/
 data/pilot_results/
 rentGPUs_runs/
