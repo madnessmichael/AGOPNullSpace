@@ -42,23 +42,28 @@ class SteerGemma2DecoderLayer(Gemma2DecoderLayer):
         if steering_vector is not None:
             self.steering_vector = steering_vector.to(device=device, dtype=dtype)
         else:
-            self.steering_vector = torch.empty(hidden_dim, device=device, dtype=dtype)
+            # BUG FIX: see SteerLlama.py -- torch.empty() is uninitialized
+            # memory (and can be a meta tensor under device_map loading);
+            # None is the correct "nothing set yet" sentinel.
+            self.steering_vector = None
         strength = 0.0 if strength is None else strength
         self.strength = torch.tensor(strength, device=device, dtype=dtype)
 
     def set_steering_parameters(
-        self, 
-        steering_vector: Optional[torch.Tensor]=None, 
+        self,
+        steering_vector: Optional[torch.Tensor]=None,
         strength: float = 0.0,
         device: Optional[torch.device] = None):
-        
+
         device = next(self.parameters()).device if device is None else device
         dtype = self.input_layernorm.weight.dtype
-        
+
         if steering_vector is not None:
+            # BUG FIX: see SteerLlama.py -- don't wipe the vector to None on
+            # strength-only updates (generate_response.py's per-strength loop
+            # never re-passes steering_vector), or steering silently turns off
+            # after the first strength in the sweep.
             self.steering_vector = steering_vector.to(device=device, dtype=dtype)
-        else:
-            self.steering_vector = None
 
         strength = 0.0 if strength is None else strength
         self.strength = torch.tensor(strength, device=device, dtype=dtype)

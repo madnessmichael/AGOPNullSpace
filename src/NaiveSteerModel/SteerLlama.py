@@ -42,23 +42,37 @@ class SteerLlamaDecoderLayer(LlamaDecoderLayer):
         if steering_vector is not None:
             self.steering_vector = steering_vector.to(device=device, dtype=dtype)
         else:
-            self.steering_vector = torch.empty(hidden_dim, device=device, dtype=dtype)
+            # BUG FIX: torch.empty() is uninitialized memory (not zeros), and
+            # was previously only ever masked because set_steering_parameters
+            # unconditionally reset this to None afterward -- now that that
+            # wipe is removed, an uninitialized/meta buffer here would crash
+            # print_steering_parameters (or worse, silently add garbage to
+            # hidden_states if strength were ever nonzero before a real
+            # vector is set). None is the correct "nothing set yet" sentinel,
+            # consistent with the AlphaSteerModel classes and with how
+            # forward()/print_steering_parameters() already check `is None`.
+            self.steering_vector = None
         strength = 0.0 if strength is None else strength
         self.strength = torch.tensor(strength, device=device, dtype=dtype)
 
     def set_steering_parameters(
-        self, 
-        steering_vector: Optional[torch.Tensor]=None, 
+        self,
+        steering_vector: Optional[torch.Tensor]=None,
         strength: float = 0.0,
         device: Optional[torch.device] = None):
-        
+
         device = next(self.parameters()).device if device is None else device
         dtype = self.input_layernorm.weight.dtype
-        
+
         if steering_vector is not None:
+            # BUG FIX: previously `else: self.steering_vector = None` wiped the
+            # vector on every strength-only update (generate_response.py's
+            # per-strength loop calls set_steering_parameters(strength=...)
+            # without re-passing steering_vector) -- steering silently turned
+            # off after the first strength in the sweep, so every subsequent
+            # strength produced the identical unsteered output. Preserve the
+            # previously set vector when it isn't passed again.
             self.steering_vector = steering_vector.to(device=device, dtype=dtype)
-        else:
-            self.steering_vector = None
 
         strength = 0.0 if strength is None else strength
         self.strength = torch.tensor(strength, device=device, dtype=dtype)

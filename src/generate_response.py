@@ -53,13 +53,34 @@ if __name__ == "__main__":
     # BẮT BẪY MULTI-GPU: Tránh load thẳng ma trận vào thiết bị mang chữ "auto"
     load_device = "cpu" if args.device == "auto" else args.device
 
+    rank1_gate_factors = None
+    gate_type = gate_slope = None
     if hasattr(args, "steering_matrix_path"):
         model_class, config_class, model_id = AlphaSteer_MODELS_DICT[args.model_name]
         if os.path.exists(args.steering_matrix_path):
-            steering_matrix_or_vector = torch.load(args.steering_matrix_path, map_location=load_device)
-            steering_matrix_or_vector = steering_matrix_or_vector.to(torch.bfloat16)
-            logger.info(f"Generate with Null Space Steering")
-            steering_layers = AlphaSteer_STEERING_LAYERS[args.model_name]
+            loaded = torch.load(args.steering_matrix_path, map_location=load_device)
+            if isinstance(loaded, dict) and loaded.get("format") == "rank1_gate_v1":
+                # nonlinear-gate path (calc_steering_matrix_rfm_rc.py): rank-1 {u, r}
+                # per layer, no dense [d,d] matrix -- can't be cast/used like a tensor.
+                steering_matrix_or_vector = None
+                rank1_gate_factors = {
+                    layer: {
+                        "u": f["u"].to(torch.bfloat16) if f.get("u") is not None else None,
+                        "r": f["r"].to(torch.bfloat16),
+                    }
+                    for layer, f in loaded["factors"].items()
+                }
+                gate_type = loaded["gate_type"]
+                gate_slope = loaded["gate_slope"]
+                n_gated = sum(1 for f in rank1_gate_factors.values() if f["u"] is not None)
+                mode = "gated" if n_gated == len(rank1_gate_factors) else (
+                    "no-gate" if n_gated == 0 else "mixed")
+                logger.info(f"Generate with Null Space Steering (rank1_gate_v1, gate={gate_type}, mode={mode})")
+                steering_layers = loaded["layers"]
+            else:
+                steering_matrix_or_vector = loaded.to(torch.bfloat16)
+                logger.info(f"Generate with Null Space Steering")
+                steering_layers = AlphaSteer_STEERING_LAYERS[args.model_name]
         else:
             raise ValueError("steering_matrix_path does not exist")
     elif hasattr(args, "steering_vector_path"):
@@ -97,6 +118,11 @@ if __name__ == "__main__":
         model.set_steering_parameters(
             steering_matrix_or_vector,
             strength=strength
+        )
+    elif rank1_gate_factors is not None:
+        model.set_steering_parameters(
+            factors=rank1_gate_factors, gate_type=gate_type, gate_slope=gate_slope,
+            strength=strength,
         )
     else:
         logger.info(f"Generate without Steering")

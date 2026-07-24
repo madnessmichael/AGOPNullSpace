@@ -1,0 +1,10 @@
+device: cuda:2
+model_name: gemma2
+input_file: data/instructions/test/gemma2/aim_gemma2.json
+output_file: data/responses/gemma2/aim_gemma2_rfm_results_gemma2_agopn_gemma2_rc_nons.json
+batch_size: 1
+max_new_tokens: 128
+file_rename: False
+prompt_column: query
+strength: "0.0,0.3,0.5,0.7,0.9,1.0,1.3,1.5"
+steering_matrix_path: data/steering_matrix/steering_matrix_gemma2_rfm_rc_no_nullspace.pt
