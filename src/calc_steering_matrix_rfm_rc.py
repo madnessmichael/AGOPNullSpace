@@ -74,12 +74,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_refusal_compliance_embeddings(embedding_dir: str) -> tuple[torch.Tensor, torch.Tensor]:
+def load_refusal_compliance_embeddings(embedding_dir: str, rc_subdir: str = "refusal_compliance"
+                                       ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Load per-model SORRY-Bench refuse-compliance activations produced by
-    build_refusal_compliance_sorrybench.py: [N, num_layers, d_model] each.
+    build_refusal_compliance_sorrybench.py + extract_refusal_compliance_embeddings.py:
+    [N, num_layers, d_model] each. rc_subdir switches between the 440-row
+    "refusal_compliance" (base prompts only) and the 9,236-row
+    "refusal_compliance_full" (all 21 SORRY-Bench prompt_style variants).
     """
-    rc_dir = os.path.join(embedding_dir, "refusal_compliance")
+    rc_dir = os.path.join(embedding_dir, rc_subdir)
     refusal_path = os.path.join(rc_dir, "embeds_refusal.pt")
     compliance_path = os.path.join(rc_dir, "embeds_compliance.pt")
     if not (os.path.exists(refusal_path) and os.path.exists(compliance_path)):
@@ -99,7 +103,11 @@ def parse_args():
     p.add_argument("--model_name", required=True)
     p.add_argument("--embedding_dir", required=True,
                    help="Base dir with AlphaSteer embeddings (gate/null-space) AND "
-                        "a refusal_compliance/ subfolder (concept vector r).")
+                        "a refusal_compliance/ (or --rc_subdir) subfolder (concept vector r).")
+    p.add_argument("--rc_subdir", default="refusal_compliance",
+                   help="Which refuse-compliance embedding subfolder to train r on: "
+                        "'refusal_compliance' (440 base prompts, default) or "
+                        "'refusal_compliance_full' (9,236 rows, all 21 prompt_style variants).")
     p.add_argument("--save_path", required=True)
     p.add_argument("--device", default="cuda")
 
@@ -151,7 +159,7 @@ def main():
                 len(fit_idx), len(ho_idx), H_malicious.shape[0], num_total_layers, d_model)
 
     # -- 2. Concept vector r from the SORRY-Bench refuse-compliance set --
-    H_refusal, H_compliance = load_refusal_compliance_embeddings(args.embedding_dir)
+    H_refusal, H_compliance = load_refusal_compliance_embeddings(args.embedding_dir, args.rc_subdir)
     if H_refusal.shape[1] != num_total_layers or H_refusal.shape[2] != d_model:
         raise ValueError(
             f"refuse-compliance activations have shape {tuple(H_refusal.shape)[1:]}, "
@@ -240,7 +248,7 @@ def main():
 
     meta = {
         "model_name": args.model_name, "probe": args.probe,
-        "concept_source": "sorry-bench/sorry-bench-202503 (refusal_compliance)",
+        "concept_source": f"sorry-bench/sorry-bench-202503 ({args.rc_subdir})",
         "n_refusal": int(H_refusal.shape[0]), "n_compliance": int(H_compliance.shape[0]),
         "gate_data": "alphasteer_malicious", "nullspace_data": "alphasteer_benign",
         "rfm_iters": args.rfm_iters, "tuning_metric": args.tuning_metric,

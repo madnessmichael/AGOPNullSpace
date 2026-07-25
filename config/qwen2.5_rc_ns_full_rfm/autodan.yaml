@@ -1,0 +1,10 @@
+device: cuda:1
+model_name: qwen2.5
+input_file: data/instructions/test/qwen2.5/autodan_qwen2.5.json
+output_file: data/responses/qwen2.5/autodan_qwen2.5_rfm_results_qwen2.5_agopn_qwen2.5_rc_ns_full.json
+batch_size: 16
+max_new_tokens: 128
+file_rename: False
+prompt_column: query
+strength: "0.0,0.3,0.5,0.7,0.9,1.0,1.3,1.5,8.0,8.5,9.0,9.5,10.0,10.5,11.0"
+steering_matrix_path: data/steering_matrix/steering_matrix_qwen2.5_rfm_rc_full.pt

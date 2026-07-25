@@ -17,7 +17,7 @@ ENTRIES=(
 
 DATASETS=(aim autodan cipher gcg jailbroken pair renellm gsm8k math xstest)
 
-NUM_GPUS=8
+NUM_GPUS=7  # 0-6 only -- GPU 7 reserved for interactive use (inference_sample.ipynb)
 gpu_idx=0
 
 echo "== Generating ${#ENTRIES[@]} variant x ${#DATASETS[@]} dataset (qwen2.5 high-strength) =="

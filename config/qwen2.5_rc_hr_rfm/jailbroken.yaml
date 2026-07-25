@@ -1,0 +1,10 @@
+device: cuda:4
+model_name: qwen2.5
+input_file: data/instructions/test/qwen2.5/jailbroken_qwen2.5.json
+output_file: data/responses/qwen2.5/jailbroken_qwen2.5_rfm_results_qwen2.5_agopn_qwen2.5_rc_hr.json
+batch_size: 16
+max_new_tokens: 128
+file_rename: False
+prompt_column: query
+strength: "0.0,10.0"
+steering_matrix_path: data/steering_matrix/steering_matrix_qwen2.5_rfm_rc_full_hard_refusal.pt
