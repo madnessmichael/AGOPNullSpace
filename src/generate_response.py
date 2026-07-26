@@ -5,8 +5,22 @@ import argparse
 import yaml
 import json
 import torch
+import torch._dynamo
 import numpy as np
 import pandas as pd
+
+# Gemma2's default generation_config selects a "hybrid" cache that recent
+# transformers versions auto-compile via torch.dynamo/CUDAGraphs. That compiled
+# path has two problems here: (1) the CUDAGraph private memory pool grows
+# unboundedly across the many distinct sequence lengths a batch_size=1 sweep
+# produces, eventually OOMing a 24GB card; (2) worse, a captured CUDAGraph
+# freezes the steering strength baked into the traced ops at capture time and
+# just replays it -- so every response_strength column for a row came out
+# byte-identical despite set_steering_parameters() being called with a new
+# strength each pass, and this happened SILENTLY (no error) whenever capture
+# didn't itself OOM. Disabling dynamo forces eager re-execution every call, so
+# the model actually re-reads the updated steering strength each time.
+torch._dynamo.config.disable = True
 
 torch.manual_seed(42)
 np.random.seed(42)
@@ -113,7 +127,7 @@ if __name__ == "__main__":
         device_map=args.device, # Nhận "auto" hoặc "cuda:X" mượt mà
         torch_dtype=torch.bfloat16
     )
-    
+
     if steering_matrix_or_vector is not None:
         model.set_steering_parameters(
             steering_matrix_or_vector,

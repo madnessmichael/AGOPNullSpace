@@ -94,28 +94,12 @@ class AlphaGemma2DecoderLayer(Gemma2DecoderLayer):
         last_cache_position: int = 0,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        if self.is_sliding and attention_mask is not None:  # efficient SDPA and no padding
-            # In prefill, we may be larger than sliding window
-            effective_seq_len = max(cache_position.shape[0], self.sliding_window)
-            # For FA2, the mask is 2D and is of shape [bs, processed_tokens] (not [bs, max_cache_len]),
-            # thus we must slice from the right (at most `effective_seq_len` elements)
-            if self.config._attn_implementation == "flash_attention_2":
-                attention_mask = attention_mask[:, -effective_seq_len:]
-            # Otherwise, the mask is 4D of shape [bs, 1, query_len, max_cache_len] thus we must slice
-            # from the left, with an offset if we are beyond the sliding window
-            else:
-                min_dtype = torch.finfo(hidden_states.dtype).min
-                sliding_window_mask = torch.tril(
-                    torch.ones_like(attention_mask, dtype=torch.bool), diagonal=-self.sliding_window
-                )
-                attention_mask = torch.where(sliding_window_mask, min_dtype, attention_mask)
-                # In case we are beyond the sliding window, we need to correctly offset the mask slicing
-                # `last_cache_position` is equivalent to `cache_position[-1]` but without breaking dynamo
-                offset = last_cache_position - effective_seq_len
-                # Should only be used when beyond the sliding window (i.e. offset > 0)
-                offset = max(0, offset)
-                attention_mask = attention_mask[:, :, :, offset : offset + effective_seq_len]
-
+        # NOTE: steering injection MUST use the RAW/unprocessed attention_mask (as passed in,
+        # before any sliding-window slicing/masking below) to find the last valid token
+        # position. This matches inference_sample.ipynb's monkey-patch, which injects
+        # steering before calling the real (unmodified) Gemma2DecoderLayer.forward -- i.e.
+        # it only ever sees the raw mask. Computing this against the sliding-window-processed
+        # mask instead produced max_new_tokens-dependent divergences from that reference.
         should_apply_dense_steering = (
             hidden_states.shape[1] > 1
             and self.steering_matrix is not None
@@ -198,7 +182,29 @@ class AlphaGemma2DecoderLayer(Gemma2DecoderLayer):
         #         self.steering_vector = self.steering_vector.to(hidden_states.device)
 
         #     hidden_states = hidden_states + self.steering_vector
-        
+
+        if self.is_sliding and attention_mask is not None:  # efficient SDPA and no padding
+            # In prefill, we may be larger than sliding window
+            effective_seq_len = max(cache_position.shape[0], self.sliding_window)
+            # For FA2, the mask is 2D and is of shape [bs, processed_tokens] (not [bs, max_cache_len]),
+            # thus we must slice from the right (at most `effective_seq_len` elements)
+            if self.config._attn_implementation == "flash_attention_2":
+                attention_mask = attention_mask[:, -effective_seq_len:]
+            # Otherwise, the mask is 4D of shape [bs, 1, query_len, max_cache_len] thus we must slice
+            # from the left, with an offset if we are beyond the sliding window
+            else:
+                min_dtype = torch.finfo(attention_mask.dtype).min
+                sliding_window_mask = torch.tril(
+                    torch.ones_like(attention_mask, dtype=torch.bool), diagonal=-self.sliding_window
+                )
+                attention_mask = torch.where(sliding_window_mask, min_dtype, attention_mask)
+                # In case we are beyond the sliding window, we need to correctly offset the mask slicing
+                # `last_cache_position` is equivalent to `cache_position[-1]` but without breaking dynamo
+                offset = last_cache_position - effective_seq_len
+                # Should only be used when beyond the sliding window (i.e. offset > 0)
+                offset = max(0, offset)
+                attention_mask = attention_mask[:, :, :, offset : offset + effective_seq_len]
+
         residual = hidden_states
 
         hidden_states = self.input_layernorm(hidden_states)

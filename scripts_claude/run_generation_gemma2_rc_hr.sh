@@ -14,8 +14,11 @@ run_gpu_queue() {
         tag=$(basename "$(dirname "$f")")_$(basename "$f" .yaml)
         logfile="logs/generate_rc/${tag}.log"
         echo "[$(date +%H:%M:%S)] [gpu${gpu}] launching ${f} -> ${logfile}"
-        python3 src/generate_response.py --config_path "$f" > "$logfile" 2>&1
-        echo "[$(date +%H:%M:%S)] [gpu${gpu}] finished ${f}"
+        if python3 src/generate_response.py --config_path "$f" > "$logfile" 2>&1; then
+            echo "[$(date +%H:%M:%S)] [gpu${gpu}] finished ${f}"
+        else
+            echo "[$(date +%H:%M:%S)] [gpu${gpu}] !!! FAILED (exit $?) ${f} -- see ${logfile} !!!"
+        fi
     done
 }
 

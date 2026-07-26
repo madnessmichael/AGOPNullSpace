@@ -1,0 +1,10 @@
+device: cuda:4
+model_name: llama3.1
+input_file: data/instructions/test/llama3.1/gcg_llama3.1.json
+output_file: data/responses/llama3.1/gcg_llama3.1_rfm_results_llama3.1_agopn_llama3.1_rc_hr.json
+batch_size: 32
+max_new_tokens: 128
+file_rename: False
+prompt_column: query
+strength: "0.0,0.5,1.0,1.5"
+steering_matrix_path: data/steering_matrix/steering_matrix_llama3.1_rfm_rc_full_hard_refusal.pt

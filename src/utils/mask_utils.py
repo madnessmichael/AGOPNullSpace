@@ -32,10 +32,19 @@ def get_last_valid_token_index(
             f"Unexpected attention_mask.dim={attention_mask.dim()}, expected 2 or 4."
         )
 
+    # IMPORTANT: the index math below must use the mask's OWN last dimension
+    # (mask_len), not the caller-supplied seq_len. With a fixed-size cache
+    # (e.g. HybridCache), the mask's last dim is pre-allocated to
+    # prompt_len + max_new_tokens, which is larger than seq_len (the actual
+    # current hidden_states length) during prefill. Using seq_len here silently
+    # picks the wrong (mid-sequence) token instead of the true last valid one,
+    # with the error magnitude depending on max_new_tokens.
+    mask_len = valid_mask.shape[-1]
+
     has_valid = valid_mask.any(dim=-1)
     flipped = torch.flip(valid_mask.to(dtype=torch.long), dims=[1])
     inv_idx = flipped.argmax(dim=-1)
-    last_idx = (seq_len - 1) - inv_idx
+    last_idx = (mask_len - 1) - inv_idx
 
     last_idx = torch.where(
         has_valid,

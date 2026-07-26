@@ -6,4 +6,5 @@ batch_size: 1
 max_new_tokens: 4096
 file_rename: False
 prompt_column: problem
-strength: "0.0,0.5,1.0,5.0,8.0,10.0,10.5,11.0"
+strength: "0.0,8.0,10.0"
+steering_matrix_path: data/steering_matrix/steering_matrix_gemma2_rfm_rc_full_hard_refusal.pt
