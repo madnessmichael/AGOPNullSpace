@@ -124,73 +124,92 @@ exists. Diminishing returns above K=7 (qwen2.5 is already 22/22 there); K=10 was
 as the production default. qwen2.5 needs a larger K than llama3.1/gemma2 to close the
 gap.
 
-### Defense Success Rate (DSR), K=10 — full dose-response
+### Defense Success Rate + Utility, K=10 — full dose-response, per model
 
-Judged with `llm_judge_evaluation.ipynb` (the official paper-number notebook), fraction
-of attack responses judged `reject`, averaged over 7 attack datasets (aim, autodan,
-cipher, gcg, jailbroken, pair, renellm), across every strength judged so far:
+Judged with `llm_judge_evaluation.ipynb` (the official paper-number notebook). Each
+table below rows the DSR-per-attack-dataset (`reject`-judged fraction) *and* the
+utility metrics (XSTest full-compliance %, GSM8K/MATH500 exact-match accuracy %) at
+the **same** steering strength, so a row is directly readable as one operating point's
+full safety/utility tradeoff — read across a row, not just down a column.
 
-| Model | ε | aim | autodan | cipher | gcg | jailbroken | pair | renellm | **avg DSR** |
-|---|---|---|---|---|---|---|---|---|---|
-| llama3.1 | 0.0 | 92.0 | 46.0 | 57.0 | 99.0 | 79.8 | 51.0 | 30.0 | 65.0 |
-| llama3.1 | 1.0 | 100.0 | 100.0 | 94.0 | 100.0 | 94.8 | 96.0 | 99.0 | 97.7 |
-| llama3.1 | **1.3** | 100.0 | 100.0 | 100.0 | 100.0 | 95.8 | 99.0 | 100.0 | **99.3** |
-| qwen2.5 | 0.0 | 25.0 | 22.0 | 69.0 | 81.0 | 74.4 | 19.0 | 3.0 | 41.9 |
-| qwen2.5 | 1.0 | 74.0 | 94.0 | 66.0 | 89.0 | 83.4 | 53.0 | 11.0 | 67.2 |
-| qwen2.5 | 2.0 | 98.0 | 97.0 | 71.0 | 98.0 | 84.0 | 84.0 | 40.0 | 81.7 |
-| qwen2.5 | 3.0 | 100.0 | 96.0 | 95.0 | 100.0 | 86.6 | 98.0 | 60.0 | 90.8 |
-| qwen2.5 | 3.2 | 100.0 | 94.0 | 98.0 | 100.0 | 86.0 | 97.0 | 67.0 | 91.7 |
-| qwen2.5 | 3.5 | 100.0 | 96.0 | 97.0 | 100.0 | 88.6 | 98.0 | 97.0 | 96.7 |
-| qwen2.5 | 3.7 | 100.0 | 98.0 | 97.0 | 100.0 | 91.2 | 98.0 | 100.0 | 97.7 |
-| qwen2.5 | **4.0** | 100.0 | 100.0 | 99.0 | 100.0 | 93.0 | 98.0 | 100.0 | **98.6** |
-| gemma2 | 0.0 | 0.0 | 6.0 | 73.0 | 94.0 | 68.8 | 18.0 | 7.0 | 38.1 |
-| gemma2 | 2.0 | 3.0 | 48.0 | 75.0 | 99.0 | 77.6 | 56.0 | 31.0 | 55.7 |
-| gemma2 | 4.0 | 77.0 | 92.0 | 72.0 | 99.0 | 86.8 | 80.0 | 74.0 | 83.0 |
-| gemma2 | 6.0 | 100.0 | 100.0 | 71.0 | 100.0 | 99.4 | 92.0 | 93.0 | 93.6 |
-| gemma2 | 8.0 | 100.0 | 100.0 | 72.0 | 100.0 | 99.4 | 98.0 | 98.0 | 95.3 |
-| gemma2 | **12.0** | 100.0 | 100.0 | 72.0 | 100.0 | 100.0 | 99.0 | 100.0 | **95.9** |
+#### llama3.1
 
-**Cipher is stuck for gemma2 across the entire dose range** (73→75→72→71→72→72 from
-ε=0 to ε=12) — not sampling noise at the endpoints as earlier 2-point data suggested,
-but a genuine plateau; increasing strength buys essentially nothing on this dataset for
-this model. **qwen2.5's renellm needs a comparatively high dose to move**: 3→11→40→60%
-through ε=3.0, only breaking past 90% at ε≥3.5. **llama3.1 saturates fastest** — 97.7%
-average DSR already at ε=1.0.
+| ε | aim | autodan | cipher | gcg | jailbroken | pair | renellm | **avg DSR** | XSTest compliance | GSM8K acc. | MATH500 acc. |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.0 | 92.0 | 46.0 | 57.0 | 99.0 | 79.8 | 51.0 | 30.0 | 65.0 | 92.4 | 84.0 | 47.0 |
+| 1.0 | 100.0 | 100.0 | 94.0 | 100.0 | 94.8 | 96.0 | 99.0 | 97.7 | 92.0 | 89.0 | 42.0 |
+| **1.3** | 100.0 | 100.0 | 100.0 | 100.0 | 95.8 | 99.0 | 100.0 | **99.3** | 90.4 | 86.0 | 49.0 |
 
-### Utility — XSTest compliance, GSM8K/MATH500 accuracy
+<p align="center">
+  <img src="figures/dose_response_llama3.1_tradeoff.png" width="49%" alt="llama3.1 safety vs utility tradeoff"/>
+  <img src="figures/dose_response_llama3.1_per_dataset.png" width="49%" alt="llama3.1 DSR per attack dataset"/>
+</p>
 
-Same strengths as above; XSTest = full-compliance judge rate (higher = less
-overrefusal), GSM8K/MATH500 = exact-match accuracy (higher = better):
+**Saturates fastest and cheapest of the 3 models**: 97.7% avg DSR already at ε=1.0,
+while every utility metric stays within 2–5pp of its unsteered baseline across the
+entire tested range — the healthiest safety/utility tradeoff measured.
 
-| Model | ε | XSTest compliance % | GSM8K accuracy % | MATH500 accuracy % |
-|---|---|---|---|---|
-| llama3.1 | 0.0 | 92.4 | 84.0 | 47.0 |
-| llama3.1 | 1.0 | 92.0 | 89.0 | 42.0 |
-| llama3.1 | 1.3 | 90.4 | 86.0 | 49.0 |
-| qwen2.5 | 0.0 | 96.4 | 95.0 | 62.0 |
-| qwen2.5 | 1.0 | 94.0 | 94.0 | 57.0 |
-| qwen2.5 | 2.0 | 94.0 | 94.0 | 59.0 |
-| qwen2.5 | 3.0 | 90.8 | 93.0 | 58.0 |
-| qwen2.5 | 3.2 | 88.8 | 92.0 | 57.0 |
-| qwen2.5 | 3.5 | 89.2 | 92.0 | 55.0 |
-| qwen2.5 | 3.7 | 89.2 | 94.0 | 56.0 |
-| qwen2.5 | 4.0 | 86.8 | 91.0 | **48.0** |
-| gemma2 | 0.0 | 82.0 | 89.0 | 41.0 |
-| gemma2 | 2.0 | 80.0 | 88.0 | 42.0 |
-| gemma2 | 4.0 | 77.2 | 87.0 | 43.0 |
-| gemma2 | 6.0 | 75.2 | 87.0 | 40.0 |
-| gemma2 | 8.0 | 72.0 | 87.0 | 39.0 |
-| gemma2 | 12.0 | 63.2 | 83.0 | 37.0 |
+#### qwen2.5
 
-**MATH500 is the single largest utility cost measured in this pipeline**: qwen2.5 drops
-from 62% to 48% accuracy (**−14pp**) at its production strength ε=4.0 — a bigger hit
-than its XSTest overrefusal (−9.6pp). This wasn't visible before this evaluation pass
-(see [Known Limitations](#known-limitations)). GSM8K is comparatively robust for all 3
-models (≤6pp drop at max strength). XSTest degrades monotonically with strength for
-qwen2.5/gemma2, most severely for gemma2 (−18.8pp at ε=12.0); llama3.1 stays flat
-(≤2pp) across every strength tested. gemma2's baseline (ε=0, unsteered) XSTest
-compliance is already only 82% — the base model over-refuses some XSTest prompts before
-any steering is applied.
+| ε | aim | autodan | cipher | gcg | jailbroken | pair | renellm | **avg DSR** | XSTest compliance | GSM8K acc. | MATH500 acc. |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.0 | 25.0 | 22.0 | 69.0 | 81.0 | 74.4 | 19.0 | 3.0 | 41.9 | 96.4 | 95.0 | 62.0 |
+| 1.0 | 74.0 | 94.0 | 66.0 | 89.0 | 83.4 | 53.0 | 11.0 | 67.2 | 94.0 | 94.0 | 57.0 |
+| 2.0 | 98.0 | 97.0 | 71.0 | 98.0 | 84.0 | 84.0 | 40.0 | 81.7 | 94.0 | 94.0 | 59.0 |
+| 3.0 | 100.0 | 96.0 | 95.0 | 100.0 | 86.6 | 98.0 | 60.0 | 90.8 | 90.8 | 93.0 | 58.0 |
+| 3.2 | 100.0 | 94.0 | 98.0 | 100.0 | 86.0 | 97.0 | 67.0 | 91.7 | 88.8 | 92.0 | 57.0 |
+| 3.5 | 100.0 | 96.0 | 97.0 | 100.0 | 88.6 | 98.0 | 97.0 | 96.7 | 89.2 | 92.0 | 55.0 |
+| 3.7 | 100.0 | 98.0 | 97.0 | 100.0 | 91.2 | 98.0 | 100.0 | 97.7 | 89.2 | 94.0 | 56.0 |
+| **4.0** | 100.0 | 100.0 | 99.0 | 100.0 | 93.0 | 98.0 | 100.0 | **98.6** | 86.8 | 91.0 | **48.0** |
+
+<p align="center">
+  <img src="figures/dose_response_qwen2.5_tradeoff.png" width="49%" alt="qwen2.5 safety vs utility tradeoff"/>
+  <img src="figures/dose_response_qwen2.5_per_dataset.png" width="49%" alt="qwen2.5 DSR per attack dataset"/>
+</p>
+
+**renellm needs a comparatively high dose to move** (3→11→40→60% through ε=3.0, only
+breaking past 90% at ε≥3.5) and drags the average up late in the sweep. **MATH500
+accuracy is the standout cost**: it tracks roughly flat 55–62% through ε=3.7, then
+drops to 48% at the production strength ε=4.0 — the single largest utility hit
+measured anywhere in this pipeline, bigger than the XSTest compliance drop at the same
+strength (−9.6pp).
+
+#### gemma2
+
+| ε | aim | autodan | cipher | gcg | jailbroken | pair | renellm | **avg DSR** | XSTest compliance | GSM8K acc. | MATH500 acc. |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.0 | 0.0 | 6.0 | 73.0 | 94.0 | 68.8 | 18.0 | 7.0 | 38.1 | 82.0 | 89.0 | 41.0 |
+| 2.0 | 3.0 | 48.0 | 75.0 | 99.0 | 77.6 | 56.0 | 31.0 | 55.7 | 80.0 | 88.0 | 42.0 |
+| 4.0 | 77.0 | 92.0 | 72.0 | 99.0 | 86.8 | 80.0 | 74.0 | 83.0 | 77.2 | 87.0 | 43.0 |
+| 6.0 | 100.0 | 100.0 | 71.0 | 100.0 | 99.4 | 92.0 | 93.0 | 93.6 | 75.2 | 87.0 | 40.0 |
+| 8.0 | 100.0 | 100.0 | 72.0 | 100.0 | 99.4 | 98.0 | 98.0 | 95.3 | 72.0 | 87.0 | 39.0 |
+| **12.0** | 100.0 | 100.0 | 72.0 | 100.0 | 100.0 | 99.0 | 100.0 | **95.9** | 63.2 | 83.0 | 37.0 |
+
+<p align="center">
+  <img src="figures/dose_response_gemma2_tradeoff.png" width="49%" alt="gemma2 safety vs utility tradeoff"/>
+  <img src="figures/dose_response_gemma2_per_dataset.png" width="49%" alt="gemma2 DSR per attack dataset"/>
+</p>
+
+**Cipher is stuck across the entire dose range** (73→75→72→71→72→72 from ε=0 to
+ε=12) — not sampling noise at the endpoints, a genuine plateau; more strength buys
+nothing on this dataset for this model, unlike every other (model, dataset) pair.
+**XSTest compliance degrades the most steeply of the 3 models** — a steady, almost
+linear decline from 82% to 63.2% (**−18.8pp**) as strength increases, with no
+plateau in sight by ε=12. Baseline (ε=0, unsteered) XSTest compliance is already only
+82% — the base model over-refuses some XSTest prompts before any steering at all.
+
+### Cross-model takeaways
+
+- **llama3.1** > **qwen2.5** > **gemma2** in how cheaply (lowest strength, least
+  utility cost) each model reaches near-ceiling DSR.
+- **MATH500**, not XSTest, is the largest single utility cost measured — but only for
+  qwen2.5, and only right at its production strength (48% vs a flat ~55–62% at every
+  lower strength tested). GSM8K is comparatively robust everywhere (≤6pp drop at max
+  strength, any model).
+- Every model has at least one dataset that resists steering: gemma2/cipher (flat
+  ~72% at every strength ≥2.0), qwen2.5/renellm (needs ε≥3.5 to break 90%). No
+  single strength is uniformly "the" right choice per model — it's a genuine
+  per-dataset tradeoff curve, not a step function.
 
 > **Historical figures** (`figures/table1_dsr.png`, `fig2_dsr_sweep.png`,
 > `fig3_cipher_highlight.png`, `fig4_radar.png`, `table2_utility.png`) visualize an
