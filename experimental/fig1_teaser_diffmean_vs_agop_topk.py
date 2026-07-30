@@ -142,7 +142,7 @@ def plot_method_figure(method_label, r_vec, u, H, is_ref, styles, layer, auc, ou
 
     fig = plt.figure(figsize=(7.6, 8.8))
     fig.patch.set_facecolor("white")
-    gs = GridSpec(3, 1, figure=fig, height_ratios=[3.4, 0.18, 0.85], hspace=0.05)
+    gs = GridSpec(3, 1, figure=fig, height_ratios=[3.4, 0.55, 0.85], hspace=0.05)
     ax = fig.add_subplot(gs[0, 0], projection="3d")
     ax_hist = fig.add_subplot(gs[2, 0])
 
@@ -160,7 +160,9 @@ def plot_method_figure(method_label, r_vec, u, H, is_ref, styles, layer, auc, ou
     ax.set_ylabel("projection onto u (null-space gate)", fontsize=9, color=INK_SECONDARY, labelpad=8)
     ax.set_zlabel("residual PC1 (within-style variance)", fontsize=9, color=INK_SECONDARY, labelpad=8)
     ax.tick_params(labelsize=7.5, colors=INK_SECONDARY)
-    ax.view_init(elev=16, azim=-50)
+    # elev/azim chosen empirically over a 6-angle sweep (see CLAUDE.md) for the
+    # clearest visual separation between the two classes, not the default view
+    ax.view_init(elev=25, azim=-45)
     ax.xaxis.pane.set_alpha(0.03)
     ax.yaxis.pane.set_alpha(0.03)
     ax.zaxis.pane.set_alpha(0.03)
@@ -207,13 +209,31 @@ def main():
     layers = main_dict["layers"]
 
     enc_data = torch.load(f"data/embeddings/{m}/rc_style_full_dir.pt", map_location="cpu")
-    H_enc_full = enc_data["H"].float()
-    styles = np.array(enc_data["prompt_style"])
-    labels_enc = np.array(enc_data["label"])
-    mask = np.isin(styles, ENCODING_STYLES)
-    H_enc_full = H_enc_full[mask]
-    is_ref = labels_enc[mask].astype(bool)
-    styles_masked = styles[mask]
+    H_all = enc_data["H"].float()
+    styles_all = np.array(enc_data["prompt_style"])
+    labels_all = np.array(enc_data["label"])
+
+    # The 4 encoding styles are llama3.1's hardest real case for DIM (n=28
+    # hard-refusal rows) -- but checked numerically, qwen2.5 has only 5 such
+    # rows and gemma2 only 1 across ALL FOUR encoding styles combined in the
+    # full 9,236-row dataset (not an extraction artifact -- verified against
+    # sorrybench_rc_dataset.json directly: these two models essentially never
+    # produce a strict "hard refusal" to an encoding-obfuscated prompt at
+    # all, a real finding in itself). AUC on n=1 or n=5 positives is not a
+    # meaningful comparison, so for those models this falls back to the full
+    # 21-style dataset instead, which still isolates a genuine per-model
+    # DIM-vs-AGOP gap on real data -- just not framed as "encoding" specifically.
+    mask = np.isin(styles_all, ENCODING_STYLES)
+    n_pos_encoding = int(labels_all[mask].astype(bool).sum())
+    MIN_POSITIVES = 20
+    if n_pos_encoding >= MIN_POSITIVES:
+        subset_desc = "encoded jailbreaks (caesar/morse/atbash/ascii)"
+        H_enc_full, is_ref, styles_masked = H_all[mask], labels_all[mask].astype(bool), styles_all[mask]
+    else:
+        print(f"NOTE: only {n_pos_encoding} hard-refusal rows in the 4 encoding styles for {m} "
+              f"(need >={MIN_POSITIVES}) -- falling back to all 21 SORRY-Bench prompt styles")
+        subset_desc = "all 21 SORRY-Bench prompt styles (encoding styles alone too sparse for this model)"
+        H_enc_full, is_ref, styles_masked = H_all, labels_all.astype(bool), styles_all
 
     if args.layer is not None:
         l = args.layer
@@ -222,6 +242,7 @@ def main():
         auc_topk = roc_auc_score(is_ref, (H_l @ r_topk_all[l]).numpy())
     else:
         l, auc_dim, auc_topk, gap = find_best_layer(H_enc_full, is_ref, r_dim_all, r_topk_all, layers)
+    print(f"subset: {subset_desc}  (n_pos={int(is_ref.sum())}, n_neg={int((~is_ref).sum())})")
     print(f"layer {l}: AUC_dim={auc_dim:.3f}  AUC_topk10={auc_topk:.3f}  gap={auc_topk-auc_dim:+.3f}")
 
     H = H_enc_full[:, l, :]

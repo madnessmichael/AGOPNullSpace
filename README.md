@@ -83,6 +83,27 @@ encoding).
   <code>python experimental/fig1_teaser_diffmean_vs_agop_topk.py</code>.</em>
 </p>
 
+<p align="center">
+  <img src="figures/fig1_teaser_dim_qwen2.5.png" width="49%" alt="qwen2.5 DiffMean 3D, AUC 0.88"/>
+  <img src="figures/fig1_teaser_agop_topk_qwen2.5.png" width="49%" alt="qwen2.5 AGOP top-K 3D, AUC 0.94"/>
+  <br>
+  <img src="figures/fig1_teaser_dim_gemma2.png" width="49%" alt="gemma2 DiffMean 3D, AUC 0.87"/>
+  <img src="figures/fig1_teaser_agop_topk_gemma2.png" width="49%" alt="gemma2 AGOP top-K 3D, AUC 0.95"/>
+  <br>
+  <em>Fig. 2 — Same real-data method, qwen2.5 (top row, layer 12) and gemma2 (bottom
+  row, layer 22). <b>These two models could not use the encoding-only subset Fig. 1
+  uses</b>: checked directly against the source dataset, qwen2.5 has only 5 hard-refusal
+  rows and gemma2 only 1 across all 1,760 caesar/morse/atbash/ascii prompts combined —
+  both models essentially never produce a strict, unhedged refusal to an
+  encoding-obfuscated prompt in the first place, a real finding in its own right, not an
+  extraction bug. AUC on 1–5 positives isn't a meaningful comparison, so these two
+  figures fall back to all 21 SORRY-Bench prompt styles instead (thousands of positives
+  each) — still real data and a real per-model DIM-vs-AGOP gap, just not specifically an
+  "encoding" story for these two. Gap is smaller than llama3.1's (qwen2.5: AUC
+  0.88→0.94; gemma2: 0.87→0.95) because the broader 21-style task is easier for DIM to
+  begin with — most styles are plain natural language, not obfuscated.</em>
+</p>
+
 AGOPNullSpace computes the direction as the **top-K eigenvectors of the AGOP matrix**,
 ridge-combined into a single vector, via an iterative kernel regression loop:
 

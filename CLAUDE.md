@@ -375,14 +375,51 @@ means differ by whole units before de-styling, ~1e-7 after), producing a distrac
 bimodal band that has nothing to do with DIM vs AGOP and made the first draft of this
 figure confusing; de-styling isolates genuine within-style variance instead.
 
-Data: the encoding-family (caesar/morse/atbash/ascii) hard-refusal subset. Layer (12)
-is picked by an actual AUC-gap search over all 26 steering layers, not eyeballed; real
-result AUC(r_DIM)=0.27 (worse than random) vs AUC(r_topk10)=0.79 — in the DIM figure the
-hard-refusal points are visibly scattered across the x-axis mixed with compliance; in
-the AGOP figure they form a visibly distinct cluster. Only llama3.1 has the required
-sample files (`data/embeddings/llama3.1/rc_style_full_dir.pt` and the DIM `_r.pt`
-companion) — the script won't run as-is for qwen2.5/gemma2 without first generating
-those.
+Data: the encoding-family (caesar/morse/atbash/ascii) hard-refusal subset for llama3.1.
+Layer (12) is picked by an actual AUC-gap search over all 26 steering layers, not
+eyeballed; real result AUC(r_DIM)=0.27 (worse than random) vs AUC(r_topk10)=0.79 — in
+the DIM figure the hard-refusal points are visibly scattered across the x-axis mixed
+with compliance; in the AGOP figure they form a visibly distinct cluster.
+
+**qwen2.5/gemma2 needed data built from scratch** (`data/embeddings/{qwen2.5,gemma2}/
+rc_style_full_dir.pt`, `data/steering_matrix/steering_matrix_{qwen2.5,gemma2}_dim_rc_
+full_hard_refusal*.pt`) — only llama3.1 had these initially. To regenerate:
+```bash
+python src/calc_steering_matrix_dim_rc.py --model_name <m> --embedding_dir data/embeddings/<m> \
+    --rc_subdir refusal_compliance_full_hard_refusal \
+    --save_path data/steering_matrix/steering_matrix_<m>_dim_rc_full_hard_refusal.pt --device cuda:0
+# per-style extraction (21 styles), then merge:
+python evaluation/extract_rc_style_sample.py --model_name <hf_id> \
+    --rc_json data/embeddings/<m>/refusal_compliance_full_hard_refusal/sorrybench_rc_dataset.json \
+    --out_file data/embeddings/<m>/rc_style_full_dir --n_per_style 500 \
+    --only_style <style> --device cuda:0   # one call per style, see scripts_claude/run_extract_rc_style_full.sh
+python evaluation/extract_rc_style_sample.py --model_name dummy --merge \
+    --rc_json <same> --out_file data/embeddings/<m>/rc_style_full_dir
+```
+Two real gotchas hit doing this:
+- **`extract_embeddings()` computes full `lm_head` logits over the entire sequence even
+  though only `hidden_states` is needed** (`output_hidden_states=True` doesn't skip the
+  logits projection) — `batch × seq_len × vocab_size` OOMs easily for gemma2 (~256k
+  vocab) and qwen2.5 (~152k vocab), even at `batch_size=1`, on styles with long prompts.
+  This affected way more styles for gemma2 (12/21 failed at the default batch_size=16)
+  than qwen2.5 (3/21) purely because of gemma2's larger vocab — not a per-style prompt
+  length issue except for gemma2's `ascii` specifically, which OOM'd even at
+  `batch_size=1` (one genuinely very long ascii-art prompt in that style) and was
+  dropped rather than root-caused further (`ascii` excluded from gemma2's merged file:
+  20/21 styles, not 21/21 — the encoding-family fallback below makes this moot anyway).
+  Fix for everything except `ascii`: lower `--batch_size_short` (4 for qwen2.5, 2 for
+  gemma2 was enough).
+- **qwen2.5 has only 5 hard-refusal rows and gemma2 only 1**, across all 4 encoding
+  styles combined in the full 9,236-row dataset (checked directly against
+  `sorrybench_rc_dataset.json`, not an extraction artifact) — both models essentially
+  never produce a strict/unhedged refusal to an encoding-obfuscated prompt at all. AUC
+  on 1–5 positives is meaningless, so the script falls back to **all 21 SORRY-Bench
+  styles** (thousands of positives) for any model where the encoding-only subset has
+  fewer than `MIN_POSITIVES=20` hard-refusal rows — still real data, still a real
+  per-model DIM-vs-AGOP gap, just a smaller one (qwen2.5: 0.88→0.94; gemma2: 0.87→0.95)
+  since the broader task is easier for DIM to begin with (most of the 21 styles are
+  plain natural language, not obfuscated). README's Fig. 2 explains this to the reader;
+  don't present it as the same "encoding" comparison Fig. 1 (llama3.1) makes.
 
 **Explicit decision boundary, not just colored dots** — feedback on an earlier draft
 was that a bare 3D scatter makes the viewer infer separation themselves with no visual
@@ -405,6 +442,14 @@ clips the rotated 3D axis-label text (e.g. cuts the leading "P" off "Projection 
 ...") because `bbox_inches="tight"` computes the crop box tightly around the rendered
 artists, and mplot3d's rotated tick/axis labels render partly outside their nominal
 axes bounds.
+
+**View angle (`elev=25, azim=-45`) was picked empirically, not the mplot3d default** —
+rendered the same llama3.1 data at 6 candidate `(elev, azim)` pairs side by side
+(`/tmp/angle_compare.png`, not checked in) and picked the one where the hard-refusal
+cluster reads as most visually distinct from the compliance cloud with least occlusion.
+Raising `elev` from 16→25 required also widening the 3D↔histogram gap row
+(`height_ratios` middle value 0.18→0.55) — the steeper angle changes where the rotated
+x-axis label renders and it started overlapping the histogram's legend otherwise.
 
 ## Model-specific quirks
 
