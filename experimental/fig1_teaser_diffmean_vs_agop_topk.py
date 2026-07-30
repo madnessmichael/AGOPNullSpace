@@ -166,11 +166,11 @@ def plot_method_figure(method_label, r_vec, u, H, is_ref, styles, layer, auc, ou
     ax.zaxis.pane.set_alpha(0.03)
     ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
 
-    verdict = "separates cleanly" if auc >= 0.7 else ("does not separate" if auc <= 0.4 else "partially separates")
-    ax.set_title(
-        f"{method_label}  —  llama3.1, layer {layer}\n"
-        f"encoded jailbreaks (caesar/morse/atbash/ascii): AUC = {auc:.2f}  ({verdict} along its own axis)",
-        fontsize=11.5, fontweight="bold", color="#0b0b0b", pad=14)
+    # short, single-line title -- full context (dataset, layer, verdict) goes in
+    # the README caption instead, so it doesn't eat vertical space here and
+    # shrink the actual 3D plot
+    ax.set_title(f"{method_label}:  AUC = {auc:.2f}",
+                 fontsize=13, fontweight="bold", color="#0b0b0b", pad=6)
 
     # ---- marginal 1D histogram along x, with the SAME decision plane as a vertical line ----
     bins = np.linspace(min(x.min(), thr_z) - 0.2, max(x.max(), thr_z) + 0.2, 40)
@@ -191,7 +191,7 @@ def plot_method_figure(method_label, r_vec, u, H, is_ref, styles, layer, auc, ou
     ax_hist.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3,
                     fontsize=7.5, frameon=False, handlelength=1.4, columnspacing=1.0)
 
-    fig.savefig(out_path, dpi=220, facecolor="white", bbox_inches="tight")
+    fig.savefig(out_path, dpi=220, facecolor="white", bbox_inches="tight", pad_inches=0.6)
     plt.close(fig)
     print(f"Saved -> {out_path}  (AUC={auc:.3f}, Youden thr(raw)={thr_raw:.4f})")
 

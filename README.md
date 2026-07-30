@@ -17,28 +17,6 @@
   <img src="figures/FigureAGOPNs.png" width="95%" alt="AGOPNullSpace pipeline overview"/>
 </p>
 
-<p align="center">
-  <img src="figures/fig1_teaser_dim_llama3.1.png" width="49%" alt="DiffMean 3D: hard-refusal points scattered across its own axis, AUC 0.27, no separation"/>
-  <img src="figures/fig1_teaser_agop_topk_llama3.1.png" width="49%" alt="AGOP top-K ridge-combo 3D: hard-refusal points form a distinct cluster along its own axis, AUC 0.79"/>
-  <br>
-  <em>Fig. 1 — Same real activations (llama3.1, layer 12, hardest real case for DiffMean:
-  encoded jailbreaks — Caesar/morse/atbash/ascii), one 3D figure per method so each
-  method's own separating axis (x) is unambiguous. The gray plane in each 3D plot and
-  the dashed line in the 1D histogram beneath it mark the same thing — the ROC-optimal
-  decision cut (Youden's J) on that method's own axis — so the separation doesn't have
-  to be eyeballed off a bare point cloud. <b>Left (DiffMean):</b> hard-refusal points
-  (orange) sit on both sides of the cut, mixed in with compliance — AUC 0.27, worse than
-  random; no single cut on this axis works, because the malicious points form two
-  separate clusters on opposite ends of it. <b>Right (AGOP top-K ridge-combo):</b> the
-  same points fall almost entirely on one side of the cut — AUC 0.79. The shared y-axis
-  in both (projection onto <code>u</code>, the real null-space gate) and z-axis (residual
-  variance after removing each point's own encoding-style mean, so it isn't just showing
-  "which cipher was used") are identical across the two figures — only the x-axis (each
-  method's own direction) differs, by design, so the comparison is apples-to-apples. No
-  synthetic/toy data anywhere. Reproduce with
-  <code>python experimental/fig1_teaser_diffmean_vs_agop_topk.py</code>.</em>
-</p>
-
 > **EMNLP 2025 submission:** *Beyond Behavioral Refusal Directions: Null-Space Constrained Safety Steering with Recursive Feature Machines*
 
 > **This README reflects the current top-K ridge-combo pipeline** (the method actually
@@ -83,11 +61,27 @@ works well when the two classes are linearly separable in Euclidean space, but d
 on attacks that obfuscate the surface form of a prompt (Cipher, Base64, role-play
 encoding).
 
-See **Fig. 1 at the top of this README** for this effect on real activations, not a
-concept sketch — DiffMean scores encoded-jailbreak prompts worse than random (AUC 0.27)
-on its own axis, while the AGOP top-K direction separates them cleanly (AUC 0.79), with
-an explicit decision boundary and 1D histogram in each figure so the separation (or
-lack of it) doesn't have to be eyeballed off a bare 3D point cloud.
+<p align="center">
+  <img src="figures/fig1_teaser_dim_llama3.1.png" width="49%" alt="DiffMean 3D: hard-refusal points scattered across its own axis, AUC 0.27, no separation"/>
+  <img src="figures/fig1_teaser_agop_topk_llama3.1.png" width="49%" alt="AGOP top-K ridge-combo 3D: hard-refusal points form a distinct cluster along its own axis, AUC 0.79"/>
+  <br>
+  <em>Fig. 1 — Same real activations (llama3.1, layer 12, hardest real case for DiffMean:
+  encoded jailbreaks — Caesar/morse/atbash/ascii), one 3D figure per method so each
+  method's own separating axis (x) is unambiguous. The gray plane in each 3D plot and
+  the dashed line in the 1D histogram beneath it mark the same thing — the ROC-optimal
+  decision cut (Youden's J) on that method's own axis — so the separation doesn't have
+  to be eyeballed off a bare point cloud. <b>Left (DiffMean):</b> hard-refusal points
+  (orange) sit on both sides of the cut, mixed in with compliance — AUC 0.27, worse than
+  random; no single cut on this axis works, because the malicious points form two
+  separate clusters on opposite ends of it. <b>Right (AGOP top-K ridge-combo):</b> the
+  same points fall almost entirely on one side of the cut — AUC 0.79. The shared y-axis
+  in both (projection onto <code>u</code>, the real null-space gate) and z-axis (residual
+  variance after removing each point's own encoding-style mean, so it isn't just showing
+  "which cipher was used") are identical across the two figures — only the x-axis (each
+  method's own direction) differs, by design, so the comparison is apples-to-apples. No
+  synthetic/toy data anywhere. Reproduce with
+  <code>python experimental/fig1_teaser_diffmean_vs_agop_topk.py</code>.</em>
+</p>
 
 AGOPNullSpace computes the direction as the **top-K eigenvectors of the AGOP matrix**,
 ridge-combined into a single vector, via an iterative kernel regression loop:

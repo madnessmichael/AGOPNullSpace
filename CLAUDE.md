@@ -353,7 +353,9 @@ reverse, and never a hand-edited/hand-drawn PNG with no regenerating script behi
 
 `experimental/fig1_teaser_diffmean_vs_agop_topk.py` → `figures/fig1_teaser_dim_
 llama3.1.png` + `figures/fig1_teaser_agop_topk_llama3.1.png` (both embedded side by
-side at the top of README.md) is the current Figure 1 teaser: real llama3.1 activations
+side under README.md's "Key Idea" section, not the very top of the page — the top is
+reserved for the pipeline-overview figure/abstract) is the current Figure 1 teaser: real
+llama3.1 activations
 only, no synthetic/toy data (see the script's own docstring for why: an earlier
 synthetic-cluster attempt, `evaluation/fig1_teaser_v2.py`'s docstring, did not
 reproduce the real phenomenon and was judged misleading to ship).
@@ -394,6 +396,15 @@ handle) rather than a floating `ax.text()` — an earlier version anchored the l
 the line's own x-position or to a fixed corner and it collided with either the 3D
 subplot's axis label or a tall histogram bar depending on which method/layer was
 plotted; a legend entry doesn't have this problem because it has a fixed slot.
+
+**Title kept to one short line** (`"{method}: AUC = {auc:.2f}"`) — an earlier two-line
+title with the full dataset/layer/verdict text ate enough vertical space to visibly
+shrink the 3D plot itself; that context now lives only in the README caption. Also use
+`savefig(..., bbox_inches="tight", pad_inches=0.6)` — a smaller/zero `pad_inches` here
+clips the rotated 3D axis-label text (e.g. cuts the leading "P" off "Projection onto
+...") because `bbox_inches="tight"` computes the crop box tightly around the rendered
+artists, and mplot3d's rotated tick/axis labels render partly outside their nominal
+axes bounds.
 
 ## Model-specific quirks
 
