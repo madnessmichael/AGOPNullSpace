@@ -1,0 +1,10 @@
+device: cuda:6
+model_name: gemma2
+input_file: data/instructions/test/math_500_sampled.json
+output_file: data/responses_ridge-combo_top-K/gemma2/math_gemma2_rfm_results_gemma2_agopn_gemma2_rc_hr_topk10.json
+batch_size: 1
+max_new_tokens: 4096
+file_rename: false
+prompt_column: problem
+strength: 0.0,8.0,9.0,10.0,11.0,12.0
+steering_matrix_path: data/steering_matrix/steering_matrix_gemma2_rfm_rc_full_hard_refusal_topk10.pt

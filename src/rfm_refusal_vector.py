@@ -323,6 +323,7 @@ def compute_concept_vector_layer(
     val_ratio: float = 0.2,
     seed: int = 42,
     device: str = "cuda",
+    combine_topk: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, dict]:
     """
     Parameters
@@ -330,11 +331,30 @@ def compute_concept_vector_layer(
     H_pos : (n_pos, d) activation của D_m (malicious), label y = 1
     H_neg : (n_neg, d) activation của D_b (benign),    label y = 0
             Hai tensor này đã được cân bằng/subsample ở tầng gọi.
+    combine_topk : nếu True VÀ n_components > 1, fit thêm một ridge combo
+        `r_combo = Σ βᵢ·componentsᵢ` trên projection của TRAIN split (không
+        đụng val), rồi CHÈN r_combo vào đầu `components` (nên
+        `components[0]` -- thứ compute_refusal_vectors() luôn lấy làm `r` --
+        trở thành r_combo thay vì top-1 thuần). Không đổi gì nếu
+        n_components == 1 (mặc định production hiện tại).
+
+        Động lực: experimental/notebooks/AGOPNs_RFM_steering_RD.ipynb đo
+        được top-1 AGOP eigenvector một mình thua xa DiffMean trên AUC giữ
+        lại (held-out) ở cả 3 model (llama3.1/qwen2.5/gemma2), trong khi một
+        ridge-combo của top-K eigenvector gần như luôn phục hồi/vượt qua
+        DiffMean -- K cần thiết khác nhau theo model (K=2 đủ ở phần lớn
+        layer của llama3.1; qwen2.5 cần K lớn hơn nhiều). Việc combine này
+        KHÔNG đổi cơ chế áp dụng lúc inference (vẫn `h' = h +
+        strength*gate(uᵀh)*r`, gate `u` không phụ thuộc `r` -- xem
+        steering_utils.py::cal_steering_factors_q) -- chỉ đổi cách `r` được
+        TÍNH, nên không cần sửa null-space math / model class / format lưu.
 
     Returns
     -------
     agop       : (d, d) trên CPU
-    components : (n_components, d) trên CPU, đã calibrate dấu
+    components : (n_components, d) trên CPU, đã calibrate dấu -- nếu
+                 combine_topk=True và n_components>1 thì shape thành
+                 (n_components + 1, d), với components[0] = r_combo.
     info       : dict
     """
     dev = torch.device(device)
@@ -400,6 +420,37 @@ def compute_concept_vector_layer(
     logger.info("  corr(Z_train @ r, y_train) = %+.4f  (>0 ⇒ r trỏ về lớp malicious)",
                 info["corr_c0"])
 
+    # ── combine_topk: ridge combo của K eigenvector, fit trên TRAIN split ────
+    if combine_topk and n_components > 1:
+        from sklearn.linear_model import RidgeClassifier
+
+        Z_train = torch.stack(
+            [project_onto_direction(train_X, components[c]) for c in range(n_components)],
+            dim=1,
+        ).detach().cpu().numpy()
+        y_train_np = train_y.squeeze(-1).detach().cpu().numpy()
+        clf = RidgeClassifier(alpha=1.0).fit(Z_train, y_train_np)
+        beta = torch.tensor(clf.coef_.reshape(-1), dtype=components.dtype, device=components.device)
+
+        r_combo = (beta.unsqueeze(0) @ components).squeeze(0)
+        r_combo = r_combo / r_combo.norm().clamp(min=1e-8)
+        proj_train = project_onto_direction(train_X, r_combo)
+        sign = 2 * (pearson_corr(train_y.squeeze(-1), proj_train) > 0).float() - 1
+        r_combo = r_combo * sign
+
+        info["combine_topk"] = True
+        info["combo_beta"] = beta.detach().cpu().tolist()
+        info["combo_auc_train"] = compute_prediction_metrics(
+            project_onto_direction(train_X, r_combo), train_y)["auc"]
+        info["combo_auc_val"] = compute_prediction_metrics(
+            project_onto_direction(val_X, r_combo), val_y)["auc"]
+        logger.info("  combine_topk (K=%d): combo AUC train=%.4f val=%.4f (top-1 alone: corr=%.4f)",
+                    n_components, info["combo_auc_train"], info["combo_auc_val"], info["corr_c0"])
+
+        components = torch.cat([r_combo.unsqueeze(0), components], dim=0)
+    else:
+        info["combine_topk"] = False
+
     del X, y, train_X, train_y, val_X, val_y
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -440,6 +491,7 @@ def compute_refusal_vectors(
     max_per_class: Optional[int] = None,
     seed: int = 42,
     device: str = "cuda",
+    combine_topk: bool = False,
 ) -> Tuple[np.ndarray, dict]:
     """
     Returns
@@ -447,6 +499,10 @@ def compute_refusal_vectors(
     refusal_vectors : (num_total_layers, d) float32 — layer không tính = zero
                       (giữ đúng format pkl DIM của AlphaSteer)
     meta            : dict[layer] -> info
+
+    combine_topk : xem compute_concept_vector_layer -- nếu True và
+        n_components > 1, `r = components[0]` bên dưới tự động là ridge
+        combo của top-n_components AGOP eigenvector thay vì top-1 thuần.
     """
     assert H_malicious.dim() == 3 and H_benign.dim() == 3
     assert H_malicious.shape[1] == H_benign.shape[1] == num_total_layers
@@ -473,6 +529,7 @@ def compute_refusal_vectors(
             h_pos, h_neg,
             probe=probe, rfm_iters=rfm_iters, n_components=n_components,
             tuning_metric=tuning_metric, seed=seed, device=device,
+            combine_topk=combine_topk,
         )
 
         r = components[0]
@@ -548,6 +605,9 @@ def parse_args():
     p.add_argument("--rfm_iters", type=int, default=5,
                    help="Reference dùng hyperparams['rfm_iters']; manuscript ghi T∈{1,2,5,10}")
     p.add_argument("--n_components", type=int, default=1)
+    p.add_argument("--combine_topk", action="store_true",
+                   help="Nếu n_components>1, ridge-combo top-K AGOP eigenvector thành 1 "
+                        "r thay vì chỉ lấy top-1 (xem compute_concept_vector_layer docstring).")
     p.add_argument("--tuning_metric", default="auc", choices=["auc", "acc", "f1", "mse"])
     p.add_argument("--max_per_class", type=int, default=None)
     p.add_argument("--include_math", action="store_true")
@@ -577,6 +637,7 @@ if __name__ == "__main__":
         probe=args.probe, rfm_iters=args.rfm_iters,
         n_components=args.n_components, tuning_metric=args.tuning_metric,
         max_per_class=args.max_per_class, seed=args.seed, device=args.device,
+        combine_topk=args.combine_topk,
     )
 
     os.makedirs(os.path.dirname(os.path.abspath(args.save_path)), exist_ok=True)

@@ -1,0 +1,10 @@
+device: cuda:6
+model_name: qwen2.5
+input_file: data/instructions/test/gsm8k_test_sampled.json
+output_file: data/responses_ridge-combo_top-K/qwen2.5/gsm8k_qwen2.5_rfm_results_qwen2.5_agopn_qwen2.5_rc_hr_topk10.json
+batch_size: 4
+max_new_tokens: 2048
+file_rename: false
+prompt_column: problem
+strength: 0.0,4.0,5.0,6.0,7.0
+steering_matrix_path: data/steering_matrix/steering_matrix_qwen2.5_rfm_rc_full_hard_refusal_topk10.pt

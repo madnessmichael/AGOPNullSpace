@@ -1,0 +1,10 @@
+device: cuda:0
+model_name: qwen2.5
+input_file: data/instructions/test/qwen2.5/aim_qwen2.5.json
+output_file: data/responses_ridge-combo_top-K/qwen2.5/aim_qwen2.5_rfm_results_qwen2.5_agopn_qwen2.5_rc_hr_topk5.json
+batch_size: 32
+max_new_tokens: 128
+file_rename: false
+prompt_column: query
+strength: 0.0,0.2,0.3,4.0,5.0,6.0,7.0
+steering_matrix_path: data/steering_matrix/steering_matrix_qwen2.5_rfm_rc_full_hard_refusal_topk5.pt

@@ -114,7 +114,20 @@ def parse_args():
     p.add_argument("--probe", default="rfm", choices=["rfm", "linear"])
     p.add_argument("--rfm_iters", type=int, default=8)
     p.add_argument("--tuning_metric", default="auc", choices=["auc", "accuracy", "mse"])
-    p.add_argument("--n_components", type=int, default=1)
+    p.add_argument("--n_components", type=int, default=1,
+                   help="How many top AGOP eigenvectors to extract per layer. With "
+                        "--combine_topk, these are ridge-combined into a single r "
+                        "(see experimental/notebooks/AGOPNs_RFM_steering_RD.ipynb: top-1 "
+                        "alone loses to DiffMean at most layers on all 3 models; K=2 "
+                        "already recovers/beats it on llama3.1, qwen2.5 needs larger K). "
+                        "Without --combine_topk, only the top-1 eigenvector is used "
+                        "regardless of this value (current production default).")
+    p.add_argument("--combine_topk", action="store_true",
+                   help="Ridge-combine the top --n_components AGOP eigenvectors into a "
+                        "single r instead of using the top-1 eigenvector alone. No effect "
+                        "when --n_components=1. Does not change the inference formula, "
+                        "null-space math, or storage format -- only how r is derived "
+                        "(gate u is independent of r, see steering_utils.py).")
     p.add_argument("--max_per_class", type=int, default=None)
     p.add_argument("--include_math", action="store_true",
                    help="Adds 900 MATH samples to AlphaSteer's D_b (gate/null-space only).")
@@ -182,6 +195,7 @@ def main():
         max_per_class=args.max_per_class,
         seed=args.seed,
         device=args.device,
+        combine_topk=args.combine_topk,
     )
     refusal_vectors = torch.from_numpy(refusal_vectors_np).float()
     logger.info("refusal_vectors %s dtype=%s (||r||=1 per layer)",
@@ -224,7 +238,7 @@ def main():
             "u_norm": float(u.norm()), "benign_holdout_leakage": leak,
             "gate_malicious": st_m, "gate_benign_holdout": st_b,
             "selectivity_ratio": sel,
-            "probe": {k: (v if isinstance(v, (int, float, str, bool)) else str(v))
+            "probe": {k: (v if isinstance(v, (int, float, str, bool, list)) else str(v))
                       for k, v in probe_meta[layer].items()},
         }
         del u, r
@@ -252,6 +266,7 @@ def main():
         "n_refusal": int(H_refusal.shape[0]), "n_compliance": int(H_compliance.shape[0]),
         "gate_data": "alphasteer_malicious", "nullspace_data": "alphasteer_benign",
         "rfm_iters": args.rfm_iters, "tuning_metric": args.tuning_metric,
+        "n_components": args.n_components, "combine_topk": args.combine_topk,
         "lambda_reg": args.lambda_reg, "seed": args.seed,
         "gate_type": args.gate_type, "gate_slope": args.gate_slope,
         "N_malicious": int(H_malicious.shape[0]), "N_benign_total": int(H_benign.shape[0]),
