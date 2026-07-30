@@ -17,6 +17,18 @@
   <img src="figures/FigureAGOPNs.png" width="95%" alt="AGOPNullSpace pipeline overview"/>
 </p>
 
+<p align="center">
+  <img src="figures/fig1_teaser_diffmean_vs_agop_llama3.1.png" width="85%" alt="DiffMean vs AGOP top-K teaser: null-space gate in 3D (left) and DiffMean failing on encoded jailbreaks vs AGOP top-K succeeding (right)"/>
+  <br>
+  <em>Fig. 1 — Real activations, no synthetic data (llama3.1, layer 12). <b>Left:</b> the null-space
+  gate <code>u</code> in 3D — benign activations sit flat at u<sup>T</sup>h≈0 while malicious
+  activations spread upward, which is what lets steering leave benign prompts ~untouched.
+  <b>Right:</b> the hardest real case for DiffMean — encoded jailbreaks (Caesar/morse/atbash/ascii) —
+  where <code>r_DIM</code> is worse than random (AUC 0.27) but the AGOP top-K ridge-combo direction
+  still separates them (AUC 0.79). Reproduce with
+  <code>python experimental/fig1_teaser_diffmean_vs_agop_topk.py</code>.</em>
+</p>
+
 > **EMNLP 2025 submission:** *Beyond Behavioral Refusal Directions: Null-Space Constrained Safety Steering with Recursive Feature Machines*
 
 > **This README reflects the current top-K ridge-combo pipeline** (the method actually

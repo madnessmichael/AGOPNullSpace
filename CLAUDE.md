@@ -347,7 +347,23 @@ which are the EMNLP rebuttal-facing comparison tooling and stay where they are. 
 notebooks under `experimental/notebooks/` do `while not os.path.exists("README.md" or
 similar marker): os.chdir("..")` at the top so paths behave the same as every other
 script here (relative to repo root) despite Jupyter's default cwd being the notebook's
-own directory.
+own directory. Code that *generates* a figure lives in `experimental/` (or `evaluation/`
+for the older pre-topK teasers); the generated PNG itself goes in `figures/` — never the
+reverse, and never a hand-edited/hand-drawn PNG with no regenerating script behind it.
+
+`experimental/fig1_teaser_diffmean_vs_agop_topk.py` → `figures/fig1_teaser_diffmean_vs_
+agop_llama3.1.png` (embedded at the top of README.md) is the current Figure 1 teaser:
+real llama3.1 activations only (no synthetic/toy data — see the script's own docstring
+for why: an earlier synthetic-cluster attempt, `evaluation/fig1_teaser_v2.py`'s
+docstring, did not reproduce the real phenomenon and was judged misleading to ship).
+Left panel: benign_val/harmful_val projected onto (r_DIM, r_topk10, u) in 3D — real
+null-space gate numbers (benign uᵀh=-0.0002±0.057, malicious uᵀh=+0.223±0.266 at layer
+12). Right panel: the encoding-family (caesar/morse/atbash/ascii) hard-refusal subset
+projected onto (r_DIM, r_topk10) — the layer (12) is picked by an actual AUC-gap search
+over all 26 steering layers, not eyeballed; real result AUC(r_DIM)=0.27 (worse than
+random) vs AUC(r_topk10)=0.79. Only llama3.1 has the required sample files
+(`data/embeddings/llama3.1/rc_style_full_dir.pt` and the DIM `_r.pt` companion) — the
+script won't run as-is for qwen2.5/gemma2 without first generating those.
 
 ## Model-specific quirks
 
