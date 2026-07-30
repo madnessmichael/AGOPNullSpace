@@ -1,34 +1,37 @@
 """
 fig1_teaser_diffmean_vs_agop_topk.py
 =====================================
-Figure-1 teaser: DiffMean (r_DIM) vs AGOP top-K ridge-combo (r_topk10),
-plus the null-space gate `u`, all from REAL computed quantities -- no
-synthetic/toy data.
+Figure-1 teaser: DiffMean (r_DIM) vs AGOP top-K ridge-combo (r_topk10), each
+as its OWN 3D figure -- from REAL computed quantities, no synthetic/toy data.
 
 IMPORTANT precedent (see evaluation/fig1_teaser_v2.py's own docstring): an
 earlier attempt to reproduce "DIM fails, AGOP succeeds" on hand-picked
 synthetic 2D Gaussian clusters did NOT reproduce the real phenomenon, and
 shipping a forced toy demo was judged to misrepresent the mechanism. This
-script therefore uses only real activations and real saved steering-matrix
-factors (r_DIM, r_topk10, u), llama3.1 only -- it's the only model with the
+script uses only real activations and real saved steering-matrix factors
+(r_DIM, r_topk10, u), llama3.1 only -- it's the only model with the
 encoding-style-labeled sample (`data/embeddings/llama3.1/rc_style_full_dir.pt`)
 and a DIM `_r.pt` companion file to compare against.
 
-Two panels:
-  LEFT  (3D) -- the null-space / gate story. Real benign_val (n=1000) +
-          harmful_val (n=1000) activations at the chosen layer, projected
-          onto (r_DIM, r_topk10, u). `u` is the real per-layer null-space gate
-          vector saved in the rank1_gate_v1 dict -- benign activations form a
-          near-flat disk at u^Th ~ 0 (real numbers below) while malicious
-          activations spread upward, which is exactly the mechanism that lets
-          the gate leave benign prompts ~untouched.
-  RIGHT (2D + marginal histograms) -- the "DIM fails on obfuscated prompts"
-          story. Real activations restricted to the 4 hardest encoding
-          styles (caesar/morse/atbash/ascii), projected onto (r_DIM, r_topk10).
-          This is where DIM's AUC actually drops below 0.5 (worse than
-          random) while the top-K ridge-combo direction still separates well
-          -- the layer is picked by an actual AUC-gap search over all 26
-          steering layers, not cherry-picked by eye.
+Design (revised after feedback that overlaying both methods' axes on one
+scatter -- e.g. x=r_DIM, y=r_topk10 on the SAME plot -- made it hard to see
+which method's *own* space actually separates the classes): each method now
+gets its own dedicated 3D figure, sharing the same interpretation across
+both so they're a fair side-by-side comparison:
+  x = projection onto that method's OWN direction (r_DIM or r_topk10) --
+      this is the axis that actually does the classifying; if the two
+      colors don't separate along x, that method's direction doesn't work
+      for this data.
+  y = projection onto u, the real per-layer null-space gate (same u in both
+      figures -- it's shared infrastructure, not method-specific -- so this
+      axis also carries the null-space story: benign flat near u^Th~0).
+  z = PC1 of the residual after projecting out x's own direction -- a
+      generic "everything else" axis so the scatter isn't degenerate, not
+      cherry-picked to flatter either method.
+
+Data: real activations restricted to the 4 hardest encoding styles
+(caesar/morse/atbash/ascii). The layer is picked by an actual AUC-gap search
+over all 26 steering layers (largest AUC_topk10 - AUC_dim), not eyeballed.
 
 Usage:
     python experimental/fig1_teaser_diffmean_vs_agop_topk.py
@@ -52,10 +55,7 @@ ENCODING_STYLES = ["caesar", "morse", "atbash", "ascii"]
 # same compliance/refusal roles fig1_teaser_v2.py already established)
 COL_COMPLIANCE = "#2a78d6"
 COL_MALICIOUS = "#eb6834"
-COL_DIM = "#4a3aa7"
-COL_TOPK = "#111111"
 INK_SECONDARY = "#52514e"
-GRIDLINE = "#e1e0d9"
 
 
 def parse_args():
@@ -63,152 +63,176 @@ def parse_args():
     p.add_argument("--model_name", default="llama3.1",
                     help="only llama3.1 has the encoding-style sample + DIM _r.pt companion file")
     p.add_argument("--layer", type=int, default=None,
-                    help="default: auto-pick the layer with the largest (AUC_topk - AUC_dim) gap on the encoding subset")
-    p.add_argument("--out_fig", default=None)
+                    help="default: auto-pick the layer with the largest (AUC_topk - AUC_dim) gap")
+    p.add_argument("--out_dir", default="figures")
     return p.parse_args()
 
 
-def find_best_layer(H, is_ref_enc, r_dim_all, r_topk_all, layers):
+def find_best_layer(H, is_ref, r_dim_all, r_topk_all, layers):
     best = None
     for l in layers:
         H_l = H[:, l, :]
-        auc_dim = roc_auc_score(is_ref_enc, (H_l @ r_dim_all[l]).numpy())
-        auc_topk = roc_auc_score(is_ref_enc, (H_l @ r_topk_all[l]).numpy())
+        auc_dim = roc_auc_score(is_ref, (H_l @ r_dim_all[l]).numpy())
+        auc_topk = roc_auc_score(is_ref, (H_l @ r_topk_all[l]).numpy())
         gap = auc_topk - auc_dim
         if best is None or gap > best[3]:
             best = (l, auc_dim, auc_topk, gap)
     return best
 
 
-def main():
-    args = parse_args()
-    m = args.model_name
-    out_fig = args.out_fig or f"figures/fig1_teaser_diffmean_vs_agop_{m}.png"
+def residual_pc1(H, r_vec, styles=None):
+    """PC1 of H after projecting out the r_vec direction -- a 'everything
+    else' axis that's guaranteed orthogonal to r_vec, not cherry-picked.
 
-    steer_dir = "data/steering_matrix"
-    main_dict = torch.load(f"{steer_dir}/steering_matrix_{m}_rfm_rc_full_hard_refusal_topk10.pt", map_location="cpu")
-    r_topk_all = torch.load(f"{steer_dir}/steering_matrix_{m}_rfm_rc_full_hard_refusal_topk10_r.pt", map_location="cpu").float()
-    r_dim_all = torch.load(f"{steer_dir}/steering_matrix_{m}_dim_rc_full_hard_refusal_r.pt", map_location="cpu").float()
-    layers = main_dict["layers"]
-    slope = main_dict["gate_slope"]
-
-    # --- encoding-family (hard) subset, for the right panel + layer search ---
-    enc_data = torch.load(f"data/embeddings/{m}/rc_style_full_dir.pt", map_location="cpu")
-    H_enc = enc_data["H"].float()
-    styles = np.array(enc_data["prompt_style"])
-    labels_enc = np.array(enc_data["label"])
-    mask = np.isin(styles, ENCODING_STYLES)
-    H_enc = H_enc[mask]
-    is_ref_enc = labels_enc[mask].astype(bool)
-
-    if args.layer is not None:
-        l = args.layer
-        H_l = H_enc[:, l, :]
-        auc_dim = roc_auc_score(is_ref_enc, (H_l @ r_dim_all[l]).numpy())
-        auc_topk = roc_auc_score(is_ref_enc, (H_l @ r_topk_all[l]).numpy())
+    If `styles` is given, each encoding style's own mean is subtracted first.
+    Without this, PC1 of the raw residual is dominated by which encoding
+    style a prompt uses (real, but a confound for this figure's actual
+    point -- checked numerically: per-style residual means differ by ~1-3
+    units before de-styling, ~1e-7 after), producing a distracting bimodal
+    band in the plot that has nothing to do with DIM vs AGOP. De-styling
+    isolates genuine within-style residual variance instead.
+    """
+    r_hat = r_vec / r_vec.norm()
+    proj = (H @ r_hat).unsqueeze(1) * r_hat.unsqueeze(0)
+    residual = (H - proj).numpy()
+    if styles is not None:
+        for st in set(styles.tolist()):
+            idx = styles == st
+            residual[idx] -= residual[idx].mean(axis=0, keepdims=True)
     else:
-        l, auc_dim, auc_topk, gap = find_best_layer(H_enc, is_ref_enc, r_dim_all, r_topk_all, layers)
-    print(f"layer {l}: AUC_dim={auc_dim:.3f}  AUC_topk10={auc_topk:.3f}  gap={auc_topk-auc_dim:+.3f}")
+        residual = residual - residual.mean(axis=0, keepdims=True)
+    # top-1 right singular vector of the residual = PC1
+    _, _, Vt = np.linalg.svd(residual, full_matrices=False)
+    pc1 = Vt[0]
+    return residual @ pc1
 
-    r_dim, r_topk = r_dim_all[l], r_topk_all[l]
-    u = main_dict["factors"][l]["u"].float()
 
-    x_enc = (H_enc[:, l, :] @ r_dim).numpy()
-    y_enc = (H_enc[:, l, :] @ r_topk).numpy()
-    x_enc_z = (x_enc - x_enc.mean()) / (x_enc.std() + 1e-8)
-    y_enc_z = (y_enc - y_enc.mean()) / (y_enc.std() + 1e-8)
+def zscore(v):
+    return (v - v.mean()) / (v.std() + 1e-8)
 
-    # --- benign_val / harmful_val (the actual gate/null-space fitting distribution) ---
-    b = torch.load(f"data/embeddings/{m}/embeds_benign_val.pt", map_location="cpu").float()[:, l, :]
-    h = torch.load(f"data/embeddings/{m}/embeds_harmful_val.pt", map_location="cpu").float()[:, l, :]
 
-    def proj(X, v):
-        return (X @ v).numpy()
+def youden_threshold(score, is_ref):
+    """ROC-optimal cut point (max TPR-FPR, Youden's J) -- a principled,
+    computed decision threshold, not an eyeballed one."""
+    from sklearn.metrics import roc_curve
+    fpr, tpr, thr = roc_curve(is_ref, score)
+    j = tpr - fpr
+    return thr[np.argmax(j)]
 
-    bx, by, bz = proj(b, r_dim), proj(b, r_topk), proj(b, u)
-    hx, hy, hz = proj(h, r_dim), proj(h, r_topk), proj(h, u)
-    print(f"benign_val  u^Th: mean={bz.mean():+.4f} std={bz.std():.4f}")
-    print(f"harmful_val u^Th: mean={hz.mean():+.4f} std={hz.std():.4f}")
 
-    # ─────────────────────────────────────────────────────────────────────
+def plot_method_figure(method_label, r_vec, u, H, is_ref, styles, layer, auc, out_path):
+    x_raw = (H @ r_vec).numpy()
+    x = zscore(x_raw)
+    y = zscore((H @ u).numpy())
+    z = zscore(residual_pc1(H, r_vec, styles=styles))
+
+    # decision threshold on the RAW projection, then mapped into the same
+    # z-scored coordinate the plot actually uses
+    thr_raw = youden_threshold(x_raw, is_ref)
+    thr_z = (thr_raw - x_raw.mean()) / (x_raw.std() + 1e-8)
+    # AUC<0.5 means the score runs backwards (refusal scores LOWER) -- the
+    # "refusal side" of the cut is then the left side, not the right
+    refusal_side = "right (higher)" if auc >= 0.5 else "left (lower)"
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.gridspec import GridSpec
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-    fig = plt.figure(figsize=(14.5, 6.8))
+    fig = plt.figure(figsize=(7.6, 8.8))
     fig.patch.set_facecolor("white")
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1.0, 1.1], wspace=0.28,
-                  left=0.03, right=0.98, top=0.85, bottom=0.10)
+    gs = GridSpec(3, 1, figure=fig, height_ratios=[3.4, 0.18, 0.85], hspace=0.05)
+    ax = fig.add_subplot(gs[0, 0], projection="3d")
+    ax_hist = fig.add_subplot(gs[2, 0])
 
-    # ---- LEFT: 3D null-space panel ----
-    ax3d = fig.add_subplot(gs[0, 0], projection="3d")
-    ax3d.scatter(bx, by, bz, s=9, color=COL_COMPLIANCE, alpha=0.35, linewidths=0,
-                 label=f"benign (n={len(b)}): uᵀh={bz.mean():+.3f}±{bz.std():.3f}")
-    ax3d.scatter(hx, hy, hz, s=9, color=COL_MALICIOUS, alpha=0.35, linewidths=0,
-                 label=f"malicious (n={len(h)}): uᵀh={hz.mean():+.3f}±{hz.std():.3f}")
+    ax.scatter(x[~is_ref], y[~is_ref], z[~is_ref], s=11, color=COL_COMPLIANCE, alpha=0.45,
+               linewidths=0, label=f"compliance (n={(~is_ref).sum()})")
+    ax.scatter(x[is_ref], y[is_ref], z[is_ref], s=55, color=COL_MALICIOUS, alpha=0.95,
+               edgecolors="white", linewidths=0.7, label=f"hard refusal (n={is_ref.sum()})")
 
-    # translucent disk at u^Th ~ 0 marking the "safe" (near-zero-gate) plane
-    xx, yy = np.meshgrid(
-        np.linspace(min(bx.min(), hx.min()), max(bx.max(), hx.max()), 2),
-        np.linspace(min(by.min(), hy.min()), max(by.max(), hy.max()), 2),
-    )
-    ax3d.plot_surface(xx, yy, np.zeros_like(xx), color=COL_COMPLIANCE, alpha=0.08, linewidth=0)
+    # decision plane: perpendicular to x, at the ROC-optimal threshold
+    yy, zz = np.meshgrid(
+        np.linspace(y.min(), y.max(), 2), np.linspace(z.min(), z.max(), 2))
+    ax.plot_surface(np.full_like(yy, thr_z), yy, zz, color="#111111", alpha=0.12, linewidth=0)
 
-    ax3d.set_xlabel("proj. onto r_DIM", fontsize=8.5, color=INK_SECONDARY, labelpad=2)
-    ax3d.set_ylabel("proj. onto r_topk10", fontsize=8.5, color=INK_SECONDARY, labelpad=2)
-    ax3d.set_zlabel("proj. onto u  (null-space gate)", fontsize=8.5, color=INK_SECONDARY, labelpad=2)
-    ax3d.tick_params(labelsize=7, colors=INK_SECONDARY)
-    ax3d.view_init(elev=18, azim=-58)
-    ax3d.xaxis.pane.set_alpha(0.03)
-    ax3d.yaxis.pane.set_alpha(0.03)
-    ax3d.zaxis.pane.set_alpha(0.03)
-    ax3d.legend(loc="upper center", bbox_to_anchor=(0.5, -0.02), fontsize=8, framealpha=0.9)
+    ax.set_xlabel(f"projection onto {method_label}'s own direction", fontsize=9, color=INK_SECONDARY, labelpad=8)
+    ax.set_ylabel("projection onto u (null-space gate)", fontsize=9, color=INK_SECONDARY, labelpad=8)
+    ax.set_zlabel("residual PC1 (within-style variance)", fontsize=9, color=INK_SECONDARY, labelpad=8)
+    ax.tick_params(labelsize=7.5, colors=INK_SECONDARY)
+    ax.view_init(elev=16, azim=-50)
+    ax.xaxis.pane.set_alpha(0.03)
+    ax.yaxis.pane.set_alpha(0.03)
+    ax.zaxis.pane.set_alpha(0.03)
+    ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
 
-    # ---- RIGHT: 2D hard-case scatter + marginal histograms ----
-    gs_right = GridSpec(4, 4, figure=fig,
-                         left=gs.get_grid_positions(fig)[3][0] + 0.05,
-                         right=0.985, top=0.80, bottom=0.11, wspace=0.05, hspace=0.05)
-    ax_scatter = fig.add_subplot(gs_right[1:4, 0:3])
-    ax_top = fig.add_subplot(gs_right[0, 0:3], sharex=ax_scatter)
-    ax_rightm = fig.add_subplot(gs_right[1:4, 3], sharey=ax_scatter)
+    verdict = "separates cleanly" if auc >= 0.7 else ("does not separate" if auc <= 0.4 else "partially separates")
+    ax.set_title(
+        f"{method_label}  —  llama3.1, layer {layer}\n"
+        f"encoded jailbreaks (caesar/morse/atbash/ascii): AUC = {auc:.2f}  ({verdict} along its own axis)",
+        fontsize=11.5, fontweight="bold", color="#0b0b0b", pad=14)
 
-    is_ref = is_ref_enc
-    ax_scatter.scatter(x_enc_z[~is_ref], y_enc_z[~is_ref], s=10, color=COL_COMPLIANCE, alpha=0.45,
-                        linewidths=0, label=f"compliance (n={(~is_ref).sum()})")
-    ax_scatter.scatter(x_enc_z[is_ref], y_enc_z[is_ref], s=42, color=COL_MALICIOUS, alpha=0.95,
-                        edgecolors="white", linewidths=0.6, label=f"hard refusal (n={is_ref.sum()})")
-    ax_scatter.set_xlabel("projection onto r_DIM  (z-scored)", fontsize=10)
-    ax_scatter.set_ylabel("projection onto r_topk10  (z-scored)", fontsize=10)
-    ax_scatter.grid(alpha=0.25, color=GRIDLINE)
-    ax_scatter.legend(loc="lower left", fontsize=8.5, framealpha=0.9)
+    # ---- marginal 1D histogram along x, with the SAME decision plane as a vertical line ----
+    bins = np.linspace(min(x.min(), thr_z) - 0.2, max(x.max(), thr_z) + 0.2, 40)
+    ax_hist.hist(x[~is_ref], bins=bins, color=COL_COMPLIANCE, alpha=0.6, density=True,
+                 label="compliance")
+    ax_hist.hist(x[is_ref], bins=bins, color=COL_MALICIOUS, alpha=0.75, density=True,
+                 label="hard refusal")
+    ax_hist.axvline(thr_z, color="#111111", linewidth=1.6, linestyle="--",
+                     label=f"decision cut (Youden's J)\nrefusal side: {refusal_side}")
+    ax_hist.set_xlabel(f"same x-axis, 1D: projection onto {method_label}'s own direction",
+                        fontsize=8.5, color=INK_SECONDARY)
+    ax_hist.set_yticks([])
+    for spine in ["top", "right", "left"]:
+        ax_hist.spines[spine].set_visible(False)
+    ax_hist.tick_params(labelsize=7.5, colors=INK_SECONDARY)
+    # legend outside/above the axes so it never overlaps a tall bar regardless
+    # of where the decision cut happens to fall for this method
+    ax_hist.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3,
+                    fontsize=7.5, frameon=False, handlelength=1.4, columnspacing=1.0)
 
-    bins = np.linspace(-3.5, 3.5, 36)
-    ax_top.hist(x_enc_z[~is_ref], bins=bins, color=COL_COMPLIANCE, alpha=0.55, density=True)
-    ax_top.hist(x_enc_z[is_ref], bins=bins, color=COL_MALICIOUS, alpha=0.75, density=True)
-    ax_top.axis("off")
-    ax_top.text(0.02, 0.85, f"AUC(r_DIM) = {auc_dim:.2f}", transform=ax_top.transAxes,
-                fontsize=11, fontweight="bold", color=COL_DIM, va="top")
+    fig.savefig(out_path, dpi=220, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved -> {out_path}  (AUC={auc:.3f}, Youden thr(raw)={thr_raw:.4f})")
 
-    ax_rightm.hist(y_enc_z[~is_ref], bins=bins, color=COL_COMPLIANCE, alpha=0.55,
-                    density=True, orientation="horizontal")
-    ax_rightm.hist(y_enc_z[is_ref], bins=bins, color=COL_MALICIOUS, alpha=0.75,
-                    density=True, orientation="horizontal")
-    ax_rightm.axis("off")
-    ax_rightm.text(0.5, 0.985, f"AUC(r_topk10)\n= {auc_topk:.2f}", transform=ax_rightm.transAxes,
-                    fontsize=11, fontweight="bold", color=COL_TOPK, ha="center", va="top")
 
-    fig.suptitle("DiffMean vs. AGOP top-K ridge-combo, and the null-space gate — real activations, no synthetic data",
-                 fontsize=14.5, fontweight="bold", y=0.975)
-    fig.text(0.03, 0.895, "Null-space gate u (real steering-matrix factor)", fontsize=11, fontweight="bold")
-    fig.text(gs_right.get_grid_positions(fig)[2][0], 0.895,
-             f"Hardest case: {m}, layer {l}, encoded jailbreaks (caesar/morse/atbash/ascii)",
-             fontsize=11, fontweight="bold")
+def main():
+    args = parse_args()
+    m = args.model_name
 
-    os.makedirs(os.path.dirname(out_fig), exist_ok=True)
-    fig.savefig(out_fig, dpi=220, facecolor="white", bbox_inches="tight")
-    print(f"Saved -> {out_fig}")
+    steer_dir = "data/steering_matrix"
+    main_dict = torch.load(f"{steer_dir}/steering_matrix_{m}_rfm_rc_full_hard_refusal_topk10.pt", map_location="cpu")
+    r_topk_all = torch.load(f"{steer_dir}/steering_matrix_{m}_rfm_rc_full_hard_refusal_topk10_r.pt", map_location="cpu").float()
+    r_dim_all = torch.load(f"{steer_dir}/steering_matrix_{m}_dim_rc_full_hard_refusal_r.pt", map_location="cpu").float()
+    layers = main_dict["layers"]
+
+    enc_data = torch.load(f"data/embeddings/{m}/rc_style_full_dir.pt", map_location="cpu")
+    H_enc_full = enc_data["H"].float()
+    styles = np.array(enc_data["prompt_style"])
+    labels_enc = np.array(enc_data["label"])
+    mask = np.isin(styles, ENCODING_STYLES)
+    H_enc_full = H_enc_full[mask]
+    is_ref = labels_enc[mask].astype(bool)
+    styles_masked = styles[mask]
+
+    if args.layer is not None:
+        l = args.layer
+        H_l = H_enc_full[:, l, :]
+        auc_dim = roc_auc_score(is_ref, (H_l @ r_dim_all[l]).numpy())
+        auc_topk = roc_auc_score(is_ref, (H_l @ r_topk_all[l]).numpy())
+    else:
+        l, auc_dim, auc_topk, gap = find_best_layer(H_enc_full, is_ref, r_dim_all, r_topk_all, layers)
+    print(f"layer {l}: AUC_dim={auc_dim:.3f}  AUC_topk10={auc_topk:.3f}  gap={auc_topk-auc_dim:+.3f}")
+
+    H = H_enc_full[:, l, :]
+    r_dim, r_topk = r_dim_all[l], r_topk_all[l]
+    u = main_dict["factors"][l]["u"].float()
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    plot_method_figure("DiffMean (r_DIM)", r_dim, u, H, is_ref, styles_masked, l, auc_dim,
+                        f"{args.out_dir}/fig1_teaser_dim_{m}.png")
+    plot_method_figure("AGOP top-K ridge-combo (r_topk10)", r_topk, u, H, is_ref, styles_masked, l, auc_topk,
+                        f"{args.out_dir}/fig1_teaser_agop_topk_{m}.png")
 
 
 if __name__ == "__main__":

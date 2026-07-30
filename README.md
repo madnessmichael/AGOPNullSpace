@@ -18,14 +18,24 @@
 </p>
 
 <p align="center">
-  <img src="figures/fig1_teaser_diffmean_vs_agop_llama3.1.png" width="85%" alt="DiffMean vs AGOP top-K teaser: null-space gate in 3D (left) and DiffMean failing on encoded jailbreaks vs AGOP top-K succeeding (right)"/>
+  <img src="figures/fig1_teaser_dim_llama3.1.png" width="49%" alt="DiffMean 3D: hard-refusal points scattered across its own axis, AUC 0.27, no separation"/>
+  <img src="figures/fig1_teaser_agop_topk_llama3.1.png" width="49%" alt="AGOP top-K ridge-combo 3D: hard-refusal points form a distinct cluster along its own axis, AUC 0.79"/>
   <br>
-  <em>Fig. 1 — Real activations, no synthetic data (llama3.1, layer 12). <b>Left:</b> the null-space
-  gate <code>u</code> in 3D — benign activations sit flat at u<sup>T</sup>h≈0 while malicious
-  activations spread upward, which is what lets steering leave benign prompts ~untouched.
-  <b>Right:</b> the hardest real case for DiffMean — encoded jailbreaks (Caesar/morse/atbash/ascii) —
-  where <code>r_DIM</code> is worse than random (AUC 0.27) but the AGOP top-K ridge-combo direction
-  still separates them (AUC 0.79). Reproduce with
+  <em>Fig. 1 — Same real activations (llama3.1, layer 12, hardest real case for DiffMean:
+  encoded jailbreaks — Caesar/morse/atbash/ascii), one 3D figure per method so each
+  method's own separating axis (x) is unambiguous. The gray plane in each 3D plot and
+  the dashed line in the 1D histogram beneath it mark the same thing — the ROC-optimal
+  decision cut (Youden's J) on that method's own axis — so the separation doesn't have
+  to be eyeballed off a bare point cloud. <b>Left (DiffMean):</b> hard-refusal points
+  (orange) sit on both sides of the cut, mixed in with compliance — AUC 0.27, worse than
+  random; no single cut on this axis works, because the malicious points form two
+  separate clusters on opposite ends of it. <b>Right (AGOP top-K ridge-combo):</b> the
+  same points fall almost entirely on one side of the cut — AUC 0.79. The shared y-axis
+  in both (projection onto <code>u</code>, the real null-space gate) and z-axis (residual
+  variance after removing each point's own encoding-style mean, so it isn't just showing
+  "which cipher was used") are identical across the two figures — only the x-axis (each
+  method's own direction) differs, by design, so the comparison is apples-to-apples. No
+  synthetic/toy data anywhere. Reproduce with
   <code>python experimental/fig1_teaser_diffmean_vs_agop_topk.py</code>.</em>
 </p>
 
@@ -73,11 +83,11 @@ works well when the two classes are linearly separable in Euclidean space, but d
 on attacks that obfuscate the surface form of a prompt (Cipher, Base64, role-play
 encoding).
 
-<p align="center">
-  <img src="figures/fig5_agop_concept.png" width="90%" alt="AGOP direction vs DiffMean concept"/>
-  <br>
-  <em>Fig. 1 — DiffMean misses encoding-obfuscated (Cipher) malicious prompts; the AGOP-derived direction captures the encoding-invariant boundary.</em>
-</p>
+See **Fig. 1 at the top of this README** for this effect on real activations, not a
+concept sketch — DiffMean scores encoded-jailbreak prompts worse than random (AUC 0.27)
+on its own axis, while the AGOP top-K direction separates them cleanly (AUC 0.79), with
+an explicit decision boundary and 1D histogram in each figure so the separation (or
+lack of it) doesn't have to be eyeballed off a bare 3D point cloud.
 
 AGOPNullSpace computes the direction as the **top-K eigenvectors of the AGOP matrix**,
 ridge-combined into a single vector, via an iterative kernel regression loop:

@@ -351,19 +351,49 @@ own directory. Code that *generates* a figure lives in `experimental/` (or `eval
 for the older pre-topK teasers); the generated PNG itself goes in `figures/` — never the
 reverse, and never a hand-edited/hand-drawn PNG with no regenerating script behind it.
 
-`experimental/fig1_teaser_diffmean_vs_agop_topk.py` → `figures/fig1_teaser_diffmean_vs_
-agop_llama3.1.png` (embedded at the top of README.md) is the current Figure 1 teaser:
-real llama3.1 activations only (no synthetic/toy data — see the script's own docstring
-for why: an earlier synthetic-cluster attempt, `evaluation/fig1_teaser_v2.py`'s
-docstring, did not reproduce the real phenomenon and was judged misleading to ship).
-Left panel: benign_val/harmful_val projected onto (r_DIM, r_topk10, u) in 3D — real
-null-space gate numbers (benign uᵀh=-0.0002±0.057, malicious uᵀh=+0.223±0.266 at layer
-12). Right panel: the encoding-family (caesar/morse/atbash/ascii) hard-refusal subset
-projected onto (r_DIM, r_topk10) — the layer (12) is picked by an actual AUC-gap search
-over all 26 steering layers, not eyeballed; real result AUC(r_DIM)=0.27 (worse than
-random) vs AUC(r_topk10)=0.79. Only llama3.1 has the required sample files
-(`data/embeddings/llama3.1/rc_style_full_dir.pt` and the DIM `_r.pt` companion) — the
-script won't run as-is for qwen2.5/gemma2 without first generating those.
+`experimental/fig1_teaser_diffmean_vs_agop_topk.py` → `figures/fig1_teaser_dim_
+llama3.1.png` + `figures/fig1_teaser_agop_topk_llama3.1.png` (both embedded side by
+side at the top of README.md) is the current Figure 1 teaser: real llama3.1 activations
+only, no synthetic/toy data (see the script's own docstring for why: an earlier
+synthetic-cluster attempt, `evaluation/fig1_teaser_v2.py`'s docstring, did not
+reproduce the real phenomenon and was judged misleading to ship).
+
+**One 3D figure per method, not one figure with both methods' axes overlaid** — an
+earlier version put r_DIM and r_topk10 on the same plot's x/y axes, which made it hard
+to tell which method's geometry was being shown. Both figures now share the same
+interpretation so they're a fair side-by-side: x = that method's own direction (r_DIM
+or r_topk10, the axis that actually classifies), y = projection onto `u` (the real
+per-layer null-space gate, identical in both figures since it's shared infra, not
+method-specific — this is also where the null-space story lives: benign_val/harmful_val
+give uᵀh=-0.0002±0.057 for benign vs +0.223±0.266 for malicious at layer 12), z = PC1 of
+the residual after projecting out x's own direction, **with each encoding style's own
+mean subtracted first**. That last detail matters: without de-styling, raw residual PC1
+is dominated by *which cipher style* a prompt uses (checked numerically — per-style
+means differ by whole units before de-styling, ~1e-7 after), producing a distracting
+bimodal band that has nothing to do with DIM vs AGOP and made the first draft of this
+figure confusing; de-styling isolates genuine within-style variance instead.
+
+Data: the encoding-family (caesar/morse/atbash/ascii) hard-refusal subset. Layer (12)
+is picked by an actual AUC-gap search over all 26 steering layers, not eyeballed; real
+result AUC(r_DIM)=0.27 (worse than random) vs AUC(r_topk10)=0.79 — in the DIM figure the
+hard-refusal points are visibly scattered across the x-axis mixed with compliance; in
+the AGOP figure they form a visibly distinct cluster. Only llama3.1 has the required
+sample files (`data/embeddings/llama3.1/rc_style_full_dir.pt` and the DIM `_r.pt`
+companion) — the script won't run as-is for qwen2.5/gemma2 without first generating
+those.
+
+**Explicit decision boundary, not just colored dots** — feedback on an earlier draft
+was that a bare 3D scatter makes the viewer infer separation themselves with no visual
+aid. Each figure now also draws (a) a translucent plane in the 3D scatter, perpendicular
+to the x-axis, at the ROC-optimal cut point (`sklearn.metrics.roc_curve`, Youden's J —
+`max(tpr-fpr)` — a computed threshold, not eyeballed), and (b) a 1D marginal histogram
+of the same x-axis underneath with the same cut as a dashed line, so separation (or the
+lack of it) is legible without interpreting the 3D angle at all. Layout note: the
+decision-cut label lives inside `ax_hist.legend()` as a third entry (a proxy `axvline`
+handle) rather than a floating `ax.text()` — an earlier version anchored the label to
+the line's own x-position or to a fixed corner and it collided with either the 3D
+subplot's axis label or a tall histogram bar depending on which method/layer was
+plotted; a legend entry doesn't have this problem because it has a fixed slot.
 
 ## Model-specific quirks
 
