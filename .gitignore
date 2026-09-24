@@ -26,7 +26,6 @@ venv/
 
 # Generated outputs
 data/embeddings/
-data/responses/
 data/steering_matrix/
 data/pilot_results/
 
