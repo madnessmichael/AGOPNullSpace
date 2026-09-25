@@ -1,4 +1,5 @@
-huggingface-cli login --token ***REMOVED***
+#!/usr/bin/env bash
+# Authenticate with Hugging Face interactively or set HF_TOKEN before running.
 
 
 # #!/bin/bash
